@@ -1,0 +1,795 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "meta": {
+    "title": "City Siege 3D - Town Hall Progression, Research Labs & Builder System Master Catalog",
+    "version": "1.3.0",
+    "totalTownHallLevels": 12,
+    "rules": {
+      "levelOneBaseline": "2 Police Stations, 2 Petrol Pumps, 6 Roadblock Obstacles, 3 Attacking Fortified Gates",
+      "newBuildingEveryLevel": true,
+      "maxBuildingCapBoundToTownHall": true,
+      "buildersUnlockWithTownHall": true,
+      "totalMaxBuilders": 7,
+      "researchLabs": [
+        { "id": "vehicle_lab", "name": "Vehicle Tuning Lab", "unlockTownHall": 2 },
+        { "id": "weapons_lab", "name": "Weapons & Munitions Lab", "unlockTownHall": 3 }
+      ]
+    }
+  },
+  "builder_system": {
+    "systemName": "Hire a Labour",
+    "description": "Labours are dedicated construction workers who erect new structures, upgrade existing fortifications, and repair battle damage. Every active build or upgrade job requires 1 free Labour. Players can 'Hire a Labour' as Town Hall levels advance, scaling from 2 starter labours up to 7 total master constructors.",
+    "mechanics": {
+      "concurrencyRule": "1 Labour per active construction or upgrade task.",
+      "busyBehavior": "When all available labours are busy, new builds and upgrades are blocked until a task finishes or is completed instantly.",
+      "speedUpSupported": true
+    },
+    "unlock_schedule": [
+      {
+        "builderNumber": 1,
+        "unlockTownHall": 1,
+        "title": "Hire a Labour: Apprentice",
+        "hutCost": { "cash": 0, "iron": 0, "wood": 0 },
+        "desc": "Foundational labour provided automatically upon starting your first settlement."
+      },
+      {
+        "builderNumber": 2,
+        "unlockTownHall": 1,
+        "title": "Hire a Labour: Journeyman",
+        "hutCost": { "cash": 200, "iron": 80, "wood": 150 },
+        "desc": "Second starter labour included in baseline Town Hall 1 layout to enable dual parallel construction."
+      },
+      {
+        "builderNumber": 3,
+        "unlockTownHall": 2,
+        "title": "Master Carpenter",
+        "hutCost": { "cash": 500, "iron": 250, "wood": 300 },
+        "desc": "Unlocks at Town Hall 2 to support expansion into sniper towers and vehicle research."
+      },
+      {
+        "builderNumber": 4,
+        "unlockTownHall": 4,
+        "title": "Architect Engineer",
+        "hutCost": { "cash": 1000, "iron": 500, "wood": 600 },
+        "desc": "Unlocks at Town Hall 4 for heavy industrial electrification and petrochemical construction."
+      },
+      {
+        "builderNumber": 5,
+        "unlockTownHall": 6,
+        "title": "Industrial Foreman",
+        "hutCost": { "cash": 2500, "iron": 1200, "wood": 1500 },
+        "desc": "Unlocks at Town Hall 6 to manage high-tech laser obelisks and urban skyscraper development."
+      },
+      {
+        "builderNumber": 6,
+        "unlockTownHall": 9,
+        "title": "Cybernetic Constructor",
+        "hutCost": { "cash": 6000, "iron": 3000, "wood": 4000 },
+        "desc": "Unlocks at Town Hall 9. Automated cybernetic builder cyborg capable of rapid nanite assembly."
+      },
+      {
+        "builderNumber": 7,
+        "unlockTownHall": 12,
+        "title": "Quantum Nano-Assembler",
+        "hutCost": { "cash": 15000, "iron": 8000, "wood": 10000 },
+        "desc": "Unlocks at Town Hall 12. Transcendent quantum particle constructor synthesizing planetary shields."
+      }
+    ],
+    "building_construction_times": {
+      "town_hall": {
+        "buildTimeSeconds": [0, 30, 60, 120, 240, 480, 960, 1800, 3600, 7200, 14400, 28800],
+        "displayTimes": ["Instant", "30s", "1m", "2m", "4m", "8m", "16m", "30m", "1h", "2h", "4h", "8h"]
+      },
+      "vehicle_lab": {
+        "buildTimeSeconds": [15, 30, 60, 120, 240, 480, 960, 1800, 3600, 7200, 14400],
+        "displayTimes": ["15s", "30s", "1m", "2m", "4m", "8m", "16m", "30m", "1h", "2h", "4h"]
+      },
+      "weapons_lab": {
+        "buildTimeSeconds": [20, 40, 80, 160, 320, 640, 1200, 2400, 4800, 9600],
+        "displayTimes": ["20s", "40s", "1m 20s", "2m 40s", "5m 20s", "10m 40s", "20m", "40m", "1h 20m", "2h 40m"]
+      },
+      "police_station": {
+        "buildTimeSeconds": [15, 30, 60, 120, 240, 480, 960, 1800, 3600, 7200, 14400, 28800],
+        "displayTimes": ["15s", "30s", "1m", "2m", "4m", "8m", "16m", "30m", "1h", "2h", "4h", "8h"]
+      },
+      "petrol_pump": {
+        "buildTimeSeconds": [10, 20, 40, 80, 160, 320, 640, 1200, 2400, 4800, 9600, 19200],
+        "displayTimes": ["10s", "20s", "40s", "1m 20s", "2m 40s", "5m 20s", "10m 40s", "20m", "40m", "1h 20m", "2h 40m", "5h 20m"]
+      },
+      "main_gate": {
+        "buildTimeSeconds": [20, 40, 80, 160, 320, 640, 1200, 2400, 4800, 9600, 19200, 38400],
+        "displayTimes": ["20s", "40s", "1m 20s", "2m 40s", "5m 20s", "10m 40s", "20m", "40m", "1h 20m", "2h 40m", "5h 20m", "10h 40m"]
+      },
+      "roadblock": {
+        "buildTimeSeconds": [5, 10, 20, 40, 80, 160, 320, 600, 1200, 2400, 4800, 9600],
+        "displayTimes": ["5s", "10s", "20s", "40s", "1m 20s", "2m 40s", "5m 20s", "10m", "20m", "40m", "1h 20m", "2h 40m"]
+      },
+      "lumber_mill": {
+        "buildTimeSeconds": [10, 20, 40, 80, 160, 320, 640, 1200, 2400, 4800, 9600, 19200],
+        "displayTimes": ["10s", "20s", "40s", "1m 20s", "2m 40s", "5m 20s", "10m 40s", "20m", "40m", "1h 20m", "2h 40m", "5h 20m"]
+      },
+      "iron_foundry": {
+        "buildTimeSeconds": [10, 20, 40, 80, 160, 320, 640, 1200, 2400, 4800, 9600, 19200],
+        "displayTimes": ["10s", "20s", "40s", "1m 20s", "2m 40s", "5m 20s", "10m 40s", "20m", "40m", "1h 20m", "2h 40m", "5h 20m"]
+      },
+      "cash_mint": {
+        "buildTimeSeconds": [15, 30, 60, 120, 240, 480, 960, 1800, 3600, 7200, 14400, 28800],
+        "displayTimes": ["15s", "30s", "1m", "2m", "4m", "8m", "16m", "30m", "1h", "2h", "4h", "8h"]
+      },
+      "sniper_tower": {
+        "buildTimeSeconds": [15, 30, 60, 120, 240, 480, 960, 1800, 3600, 7200, 14400],
+        "displayTimes": ["15s", "30s", "1m", "2m", "4m", "8m", "16m", "30m", "1h", "2h", "4h"]
+      },
+      "tesla_coil": {
+        "buildTimeSeconds": [25, 50, 100, 200, 400, 800, 1600, 3200, 6400],
+        "displayTimes": ["25s", "50s", "1m 40s", "3m 20s", "6m 40s", "13m 20s", "26m 40s", "53m 20s", "1h 46m"]
+      },
+      "laser_obelisk": {
+        "buildTimeSeconds": [30, 60, 120, 240, 480, 960, 1920],
+        "displayTimes": ["30s", "1m", "2m", "4m", "8m", "16m", "32m"]
+      },
+      "doomsday_turret": {
+        "buildTimeSeconds": [120, 240],
+        "displayTimes": ["2m", "4m"]
+      },
+      "quantum_citadel": {
+        "buildTimeSeconds": [300],
+        "displayTimes": ["5m"]
+      }
+    }
+  },
+  "research_labs": {
+    "vehicle_lab": {
+      "id": "vehicle_lab",
+      "name": "Vehicle Tuning Lab",
+      "unlockTownHall": 2,
+      "footprint": 2,
+      "baseCost": { "cash": 450, "iron": 250, "wood": 300 },
+      "desc": "High-octane automotive performance garage. Upgrades vehicle top speed, acceleration, nitro boost, hydraulic jump height, and chassis armor.",
+      "upgradeTracks": {
+        "engine_speed": {
+          "name": "Top Speed & Turbo Injection",
+          "desc": "Increases vehicle maximum velocity along straightaways and highways.",
+          "bonusPerLevel": "+12% Top Speed",
+          "maxLevel": 11
+        },
+        "acceleration": {
+          "name": "Torque & Powertrain",
+          "desc": "Improves 0-60 acceleration, quick recovery after tight turns, and hill-climbing power.",
+          "bonusPerLevel": "+15% Acceleration",
+          "maxLevel": 11
+        },
+        "nitro_boost": {
+          "name": "Nitrous Oxide Reserves",
+          "desc": "Increases nitro top-speed boost multiplier and extends nitro burn duration.",
+          "bonusPerLevel": "+18% Nitro Duration & +10% Peak Burst Speed",
+          "maxLevel": 11
+        },
+        "armor_plating": {
+          "name": "Chassis Armor & Roll Cage",
+          "desc": "Increases vehicle maximum health points and reduces damage received from ramming roadblocks and police gunfire.",
+          "bonusPerLevel": "+150 Vehicle HP & +5% Impact Absorption",
+          "maxLevel": 11
+        },
+        "jump_thrusters": {
+          "name": "Hydraulic Jump Suspension",
+          "desc": "Increases Big Jump height, air hang-time, and forward clearance distance over police cruisers and barriers.",
+          "bonusPerLevel": "+14% Jump Height & Clearance",
+          "maxLevel": 11
+        },
+        "tire_traction": {
+          "name": "Performance Treads & Drift Control",
+          "desc": "Eliminates unwanted skidding, improves steering responsiveness, and accelerates drift recovery.",
+          "bonusPerLevel": "+12% Cornering Grip & Turn Rate",
+          "maxLevel": 11
+        }
+      }
+    },
+    "weapons_lab": {
+      "id": "weapons_lab",
+      "name": "Weapons & Munitions Lab",
+      "unlockTownHall": 3,
+      "footprint": 2,
+      "baseCost": { "cash": 550, "iron": 350, "wood": 250 },
+      "desc": "Heavy munitions and explosive research foundry. Upgrades bomb blast radius, explosion damage, guided missile tracking, and EMP disruption duration.",
+      "upgradeTracks": {
+        "bomb_blast_radius": {
+          "name": "Explosive Shockwave Radius",
+          "desc": "Increases the blast diameter of vehicle-dropped bombs to destroy clusters of roadblocks and multiple buildings simultaneously.",
+          "bonusPerLevel": "+18% Blast Radius",
+          "maxLevel": 10
+        },
+        "bomb_damage": {
+          "name": "High-Explosive Payload Damage",
+          "desc": "Dramatically multiplies structural demolition damage against reinforced buildings, petrol pumps, and police cruisers.",
+          "bonusPerLevel": "+25% Explosive Damage",
+          "maxLevel": 10
+        },
+        "shrapnel_burst": {
+          "name": "Secondary Shrapnel Fragmentation",
+          "desc": "Fires outward high-velocity fragmentation pellets upon bomb detonation to ignite surrounding hazards.",
+          "bonusPerLevel": "+4 Shrapnel Fragments per blast",
+          "maxLevel": 10
+        },
+        "missile_seeker": {
+          "name": "Rocket Guidance & Warhead Speed",
+          "desc": "Accelerates missile projectile velocity and enhances tracking lock-on against moving police interceptors.",
+          "bonusPerLevel": "+20% Missile Speed & +15% Lock-on Range",
+          "maxLevel": 10
+        },
+        "emp_shockwave": {
+          "name": "EMP Pulse Disruption",
+          "desc": "Disables nearby police cruiser engines, sirens, and automated gate turrets with a high-voltage electromagnetic shockwave.",
+          "bonusPerLevel": "+0.6s Disruption Duration & +15% Pulse Radius",
+          "maxLevel": 10
+        },
+        "reload_speed": {
+          "name": "Automated Ammo Feeder",
+          "desc": "Reduces cooldown between heavy bomb drops and missile salvos.",
+          "bonusPerLevel": "-12% Ordinance Cooldown",
+          "maxLevel": 10
+        }
+      }
+    }
+  },
+  "town_halls": [
+    {
+      "level": 1,
+      "name": "Frontier Settlement",
+      "theme": "Wood & Cobblestone Countryside",
+      "maxBuildingLevelCap": 1,
+      "maxRoadTiles": 45,
+      "townHallHp": 1200,
+      "newBuildings": [
+        "town_hall",
+        "police_station",
+        "petrol_pump",
+        "main_gate",
+        "roadblock",
+        "spike_trap",
+        "lumber_mill",
+        "iron_foundry",
+        "builder_hut",
+        "tree",
+        "road"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 2,
+        "petrol_pump": 2,
+        "roadblock": 6,
+        "main_gate": 3,
+        "spike_trap": 2,
+        "lumber_mill": 2,
+        "iron_foundry": 2,
+        "builder_hut": 2,
+        "tree": 16,
+        "road": 45
+      }
+    },
+    {
+      "level": 2,
+      "name": "Rural County Seat",
+      "theme": "Red Brick & Wrought Iron",
+      "maxBuildingLevelCap": 2,
+      "maxRoadTiles": 65,
+      "townHallHp": 2200,
+      "newBuildings": [
+        "vehicle_lab",
+        "sniper_tower",
+        "spring_trap",
+        "cash_mint",
+        "builder_hut"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 2,
+        "petrol_pump": 3,
+        "roadblock": 8,
+        "main_gate": 3,
+        "vehicle_lab": 1,
+        "sniper_tower": 2,
+        "spring_trap": 3,
+        "spike_trap": 4,
+        "lumber_mill": 3,
+        "iron_foundry": 2,
+        "cash_mint": 1,
+        "builder_hut": 3,
+        "tree": 20,
+        "road": 65
+      }
+    },
+    {
+      "level": 3,
+      "name": "Developing Township",
+      "theme": "Reinforced Masonry & Structural Timber",
+      "maxBuildingLevelCap": 3,
+      "maxRoadTiles": 85,
+      "townHallHp": 3400,
+      "newBuildings": [
+        "weapons_lab",
+        "swat_armory",
+        "landmine",
+        "solar_array"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 3,
+        "swat_armory": 1,
+        "petrol_pump": 4,
+        "roadblock": 10,
+        "main_gate": 4,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "sniper_tower": 3,
+        "solar_array": 2,
+        "landmine": 4,
+        "spring_trap": 4,
+        "spike_trap": 4,
+        "lumber_mill": 3,
+        "iron_foundry": 3,
+        "cash_mint": 2,
+        "builder_hut": 3,
+        "tree": 24,
+        "road": 85
+      }
+    },
+    {
+      "level": 4,
+      "name": "Industrial Borough",
+      "theme": "Structural Steel, Rivets & Steam",
+      "maxBuildingLevelCap": 4,
+      "maxRoadTiles": 110,
+      "townHallHp": 4800,
+      "newBuildings": [
+        "tesla_coil",
+        "oil_refinery",
+        "builder_hut"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 3,
+        "swat_armory": 2,
+        "petrol_pump": 4,
+        "roadblock": 12,
+        "main_gate": 4,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "tesla_coil": 2,
+        "oil_refinery": 1,
+        "sniper_tower": 4,
+        "solar_array": 2,
+        "landmine": 6,
+        "spring_trap": 4,
+        "spike_trap": 4,
+        "lumber_mill": 4,
+        "iron_foundry": 4,
+        "cash_mint": 3,
+        "builder_hut": 4,
+        "tree": 28,
+        "road": 110
+      }
+    },
+    {
+      "level": 5,
+      "name": "Modern Municipality",
+      "theme": "Pre-Stressed Concrete & Electronics",
+      "maxBuildingLevelCap": 5,
+      "maxRoadTiles": 140,
+      "townHallHp": 6200,
+      "newBuildings": [
+        "missile_silo",
+        "tech_lab",
+        "freeze_trap"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 4,
+        "swat_armory": 2,
+        "petrol_pump": 5,
+        "roadblock": 15,
+        "main_gate": 4,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "missile_silo": 1,
+        "tech_lab": 1,
+        "freeze_trap": 3,
+        "tesla_coil": 2,
+        "oil_refinery": 2,
+        "sniper_tower": 5,
+        "solar_array": 3,
+        "landmine": 8,
+        "spring_trap": 5,
+        "spike_trap": 5,
+        "lumber_mill": 4,
+        "iron_foundry": 4,
+        "cash_mint": 3,
+        "builder_hut": 4,
+        "tree": 32,
+        "road": 140
+      }
+    },
+    {
+      "level": 6,
+      "name": "High-Tech City",
+      "theme": "Polished Glass, Chrome & Optical Lasers",
+      "maxBuildingLevelCap": 6,
+      "maxRoadTiles": 170,
+      "townHallHp": 7800,
+      "newBuildings": [
+        "laser_obelisk",
+        "builder_hut"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 4,
+        "swat_armory": 3,
+        "petrol_pump": 5,
+        "roadblock": 18,
+        "main_gate": 5,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "laser_obelisk": 2,
+        "missile_silo": 2,
+        "tech_lab": 1,
+        "tesla_coil": 3,
+        "oil_refinery": 2,
+        "sniper_tower": 6,
+        "solar_array": 3,
+        "freeze_trap": 4,
+        "landmine": 10,
+        "spring_trap": 5,
+        "spike_trap": 5,
+        "lumber_mill": 5,
+        "iron_foundry": 5,
+        "cash_mint": 4,
+        "builder_hut": 5,
+        "tree": 36,
+        "road": 170
+      }
+    },
+    {
+      "level": 7,
+      "name": "Cybernetic Metropolis",
+      "theme": "Carbon-Fiber, Neon & Autonomous Drones",
+      "maxBuildingLevelCap": 7,
+      "maxRoadTiles": 200,
+      "townHallHp": 9500,
+      "newBuildings": [
+        "drone_hangar",
+        "fusion_reactor"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 5,
+        "swat_armory": 3,
+        "petrol_pump": 6,
+        "roadblock": 20,
+        "main_gate": 5,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "drone_hangar": 1,
+        "fusion_reactor": 1,
+        "laser_obelisk": 2,
+        "missile_silo": 2,
+        "tech_lab": 1,
+        "tesla_coil": 3,
+        "oil_refinery": 3,
+        "sniper_tower": 6,
+        "solar_array": 4,
+        "freeze_trap": 5,
+        "landmine": 12,
+        "spring_trap": 6,
+        "spike_trap": 6,
+        "lumber_mill": 5,
+        "iron_foundry": 5,
+        "cash_mint": 4,
+        "builder_hut": 5,
+        "tree": 40,
+        "road": 200
+      }
+    },
+    {
+      "level": 8,
+      "name": "Fortified Megalopolis",
+      "theme": "Reinforced Composite Armor & Plasma Ordnance",
+      "maxBuildingLevelCap": 8,
+      "maxRoadTiles": 240,
+      "townHallHp": 11200,
+      "newBuildings": [
+        "plasma_mortar",
+        "vortex_trap"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 5,
+        "swat_armory": 4,
+        "petrol_pump": 6,
+        "roadblock": 24,
+        "main_gate": 6,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "plasma_mortar": 1,
+        "vortex_trap": 2,
+        "drone_hangar": 2,
+        "fusion_reactor": 1,
+        "laser_obelisk": 3,
+        "missile_silo": 3,
+        "tech_lab": 2,
+        "tesla_coil": 4,
+        "oil_refinery": 3,
+        "sniper_tower": 7,
+        "solar_array": 4,
+        "freeze_trap": 6,
+        "landmine": 14,
+        "spring_trap": 6,
+        "spike_trap": 6,
+        "lumber_mill": 6,
+        "iron_foundry": 6,
+        "cash_mint": 5,
+        "builder_hut": 5,
+        "tree": 45,
+        "road": 240
+      }
+    },
+    {
+      "level": 9,
+      "name": "Cyberpunk Sprawl",
+      "theme": "Dark Alloy, Glowing Holograms & EMP Fields",
+      "maxBuildingLevelCap": 9,
+      "maxRoadTiles": 280,
+      "townHallHp": 13000,
+      "newBuildings": [
+        "emp_disrupter",
+        "crypto_vault",
+        "builder_hut"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 6,
+        "swat_armory": 4,
+        "petrol_pump": 7,
+        "roadblock": 28,
+        "main_gate": 6,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "emp_disrupter": 1,
+        "crypto_vault": 1,
+        "plasma_mortar": 2,
+        "vortex_trap": 3,
+        "drone_hangar": 2,
+        "fusion_reactor": 2,
+        "laser_obelisk": 3,
+        "missile_silo": 3,
+        "tech_lab": 2,
+        "tesla_coil": 4,
+        "oil_refinery": 3,
+        "sniper_tower": 7,
+        "solar_array": 4,
+        "freeze_trap": 6,
+        "landmine": 16,
+        "spring_trap": 7,
+        "spike_trap": 7,
+        "lumber_mill": 6,
+        "iron_foundry": 6,
+        "cash_mint": 5,
+        "builder_hut": 6,
+        "tree": 50,
+        "road": 280
+      }
+    },
+    {
+      "level": 10,
+      "name": "Orbital Bastion",
+      "theme": "Hard-Light Emitters & Orbital Kinetic Arrays",
+      "maxBuildingLevelCap": 10,
+      "maxRoadTiles": 320,
+      "townHallHp": 15000,
+      "newBuildings": [
+        "orbital_relay"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 6,
+        "swat_armory": 5,
+        "petrol_pump": 7,
+        "roadblock": 32,
+        "main_gate": 6,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "orbital_relay": 1,
+        "emp_disrupter": 2,
+        "crypto_vault": 2,
+        "plasma_mortar": 2,
+        "vortex_trap": 4,
+        "drone_hangar": 3,
+        "fusion_reactor": 2,
+        "laser_obelisk": 4,
+        "missile_silo": 4,
+        "tech_lab": 2,
+        "tesla_coil": 5,
+        "oil_refinery": 4,
+        "sniper_tower": 8,
+        "solar_array": 5,
+        "freeze_trap": 7,
+        "landmine": 18,
+        "spring_trap": 7,
+        "spike_trap": 7,
+        "lumber_mill": 7,
+        "iron_foundry": 7,
+        "cash_mint": 6,
+        "builder_hut": 6,
+        "tree": 55,
+        "road": 320
+      }
+    },
+    {
+      "level": 11,
+      "name": "Apex Titan Fortress",
+      "theme": "Adamantium Plating, Subatomic Physics & Cataclysm Cannons",
+      "maxBuildingLevelCap": 11,
+      "maxRoadTiles": 360,
+      "townHallHp": 18000,
+      "newBuildings": [
+        "doomsday_turret",
+        "antimatter_collider"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 7,
+        "swat_armory": 5,
+        "petrol_pump": 8,
+        "roadblock": 36,
+        "main_gate": 7,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "doomsday_turret": 1,
+        "antimatter_collider": 1,
+        "orbital_relay": 2,
+        "emp_disrupter": 2,
+        "crypto_vault": 2,
+        "plasma_mortar": 3,
+        "vortex_trap": 5,
+        "drone_hangar": 3,
+        "fusion_reactor": 3,
+        "laser_obelisk": 4,
+        "missile_silo": 4,
+        "tech_lab": 3,
+        "tesla_coil": 5,
+        "oil_refinery": 4,
+        "sniper_tower": 8,
+        "solar_array": 5,
+        "freeze_trap": 8,
+        "landmine": 20,
+        "spring_trap": 8,
+        "spike_trap": 8,
+        "lumber_mill": 7,
+        "iron_foundry": 7,
+        "cash_mint": 6,
+        "builder_hut": 6,
+        "tree": 60,
+        "road": 360
+      }
+    },
+    {
+      "level": 12,
+      "name": "Transcendent Quantum Metropolis",
+      "theme": "Levitating Anti-Gravity Rings, Aurora Energy & Cosmic Shields",
+      "maxBuildingLevelCap": 12,
+      "maxRoadTiles": 420,
+      "townHallHp": 22000,
+      "newBuildings": [
+        "quantum_citadel",
+        "builder_hut"
+      ],
+      "buildingLimits": {
+        "town_hall": 1,
+        "police_station": 8,
+        "swat_armory": 6,
+        "petrol_pump": 8,
+        "roadblock": 40,
+        "main_gate": 8,
+        "vehicle_lab": 1,
+        "weapons_lab": 1,
+        "quantum_citadel": 1,
+        "doomsday_turret": 2,
+        "antimatter_collider": 2,
+        "orbital_relay": 2,
+        "emp_disrupter": 3,
+        "crypto_vault": 3,
+        "plasma_mortar": 3,
+        "vortex_trap": 6,
+        "drone_hangar": 4,
+        "fusion_reactor": 3,
+        "laser_obelisk": 5,
+        "missile_silo": 5,
+        "tech_lab": 3,
+        "tesla_coil": 6,
+        "oil_refinery": 5,
+        "sniper_tower": 10,
+        "solar_array": 6,
+        "freeze_trap": 8,
+        "landmine": 24,
+        "spring_trap": 8,
+        "spike_trap": 8,
+        "lumber_mill": 8,
+        "iron_foundry": 8,
+        "cash_mint": 7,
+        "builder_hut": 7,
+        "tree": 70,
+        "road": 420
+      }
+    }
+  ],
+  "visual_tier_evolution": {
+    "town_hall": [
+      { "tier": 1, "levels": [1], "style": "Hand-hewn rustic log cabin, rough cobblestone chimney, cedar shingle roof, lantern porch." },
+      { "tier": 2, "levels": [2, 3], "style": "Red-brick county courthouse, white pillars, slate hip roof, and brass clocktower." },
+      { "tier": 3, "levels": [4, 5], "style": "Art-deco limestone municipal hall, reinforced steel support columns, radio transmission antenna." },
+      { "tier": 4, "levels": [6, 7], "style": "Modern glass-curtain corporate skyscraper base with rooftop helicopter landing pad and floodlights." },
+      { "tier": 5, "levels": [8, 9], "style": "Cyberpunk arcology with neon cyan-magenta conduits, double skybridge, and holographic status projector." },
+      { "tier": 6, "levels": [10, 11], "style": "Dark adamantium titan fortress with glowing orange magma cooling channels and orbital uplink spire." },
+      { "tier": 7, "levels": [12], "style": "Transcendent Quantum Spire floating above magnetic anti-gravity rings with celestial blue particle aurora." }
+    ],
+    "main_gate": [
+      { "tier": 1, "levels": [1], "style": "Heavy timber palisade gatehouse with twin iron ballista swivel guns and wooden door bars." },
+      { "tier": 2, "levels": [2, 3], "style": "Stone arch fortress with steel-reinforced portcullis and twin rapid-fire cast-iron cannons." },
+      { "tier": 3, "levels": [4, 5], "style": "Heavy structural steel bunker with motorized blast door and twin motorized Vulcan gatling turrets." },
+      { "tier": 4, "levels": [6, 7], "style": "Titanium-armored composite gateway with laser tripwires and twin quad-plasma cannons." },
+      { "tier": 5, "levels": [8, 9], "style": "Nanocomposite blast fortress with kinetic shock teeth, automated missile pods, and railgun turrets." },
+      { "tier": 6, "levels": [10, 11], "style": "Adamantium citadel gatehouse with hard-light forcefields and twin rotary hyper-cannons." },
+      { "tier": 7, "levels": [12], "style": "Interstellar-class quantum gate flanked by disintegrator obelisks and impenetrable energy shielding." }
+    ],
+    "police_station": [
+      { "tier": 1, "levels": [1], "style": "Frontier wooden sheriff outpost with brass star sign, dispatching 2 classic black-and-white cruisers." },
+      { "tier": 2, "levels": [2, 3], "style": "Red-brick county precinct with barred windows and rooftop siren spotlight, dispatching faster interceptors." },
+      { "tier": 3, "levels": [4, 5], "style": "Reinforced concrete precinct with vehicle sally port and dual dispatch radio antennas." },
+      { "tier": 4, "levels": [6, 7], "style": "Modern metropolitan police headquarters with armored garage bays and tactical pursuit cruisers." },
+      { "tier": 5, "levels": [8, 9], "style": "Cyberpunk police fortress with blue-red LED warning ribbons and high-speed hover cruisers." },
+      { "tier": 6, "levels": [10, 11], "style": "Heavy SWAT bastion with automated drone recon towers and supercharged interceptors." },
+      { "tier": 7, "levels": [12], "style": "Quantum Enforcement Spire deploying levitating anti-gravity pursuit interceptors." }
+    ],
+    "petrol_pump": [
+      { "tier": 1, "levels": [1], "style": "Vintage dual hand-crank red gas pumps with drum barrels." },
+      { "tier": 2, "levels": [2, 3], "style": "Brick service station with illuminated canopy and double pump islands." },
+      { "tier": 3, "levels": [4, 5], "style": "Modern highway truck stop with quad digital pumps and underground pressurized tanks." },
+      { "tier": 4, "levels": [6, 7], "style": "High-tech octane facility with overhead chrome fuel pipelines and neon price towers." },
+      { "tier": 5, "levels": [8, 9], "style": "Cyber-fuel depot with glowing blue synthetic fuel conduits and rapid refueling rigs." },
+      { "tier": 6, "levels": [10, 11], "style": "Plasma fuel station with electromagnetic containment fields and hyper-volatile fuel cores." },
+      { "tier": 7, "levels": [12], "style": "Antimatter fueling matrix with zero-point energy siphons and crystalline energy cells." }
+    ],
+    "vehicle_lab": [
+      { "tier": 1, "levels": [1, 2], "style": "Grease-monkey brick garage with hydraulic car lift, tire racks, and open tuning bay." },
+      { "tier": 2, "levels": [3, 4], "style": "Modern dyno tuning facility with computerized engine diagnostic monitors and turbo test racks." },
+      { "tier": 3, "levels": [5, 6], "style": "Aero-wind tunnel research lab with carbon-fiber mold presses and nitro injection rigs." },
+      { "tier": 4, "levels": [7, 8], "style": "Cybernetic motorworks with robotic assembly arms and magnetic suspension calibration rigs." },
+      { "tier": 5, "levels": [9, 10], "style": "Apex aerospace garage with sub-orbital rocket thruster testing silos and hyper-alloy plating furnaces." },
+      { "tier": 6, "levels": [11], "style": "Quantum propulsion hanger with anti-grav levitation rings and zero-friction tachyon drive synthesis." }
+    ],
+    "weapons_lab": [
+      { "tier": 1, "levels": [1, 2], "style": "Blast-reinforced concrete bunker with gunpowder barrels, ballistic test range, and steel vault doors." },
+      { "tier": 2, "levels": [3, 4], "style": "Advanced munitions plant with automated shell-packing belts and high-explosive chemical vats." },
+      { "tier": 3, "levels": [5, 6], "style": "Guided missile telemetry center with radar tracking dishes and precision rocket warhead test silos." },
+      { "tier": 4, "levels": [7, 8], "style": "Plasma ordnance research lab with magnetic containment tubes and superheated ion chambers." },
+      { "tier": 5, "levels": [9, 10], "style": "EMP & antimatter fabrication foundry with particle accelerator loop and dark matter stabilization matrix." }
+    ],
+    "builder_hut": [
+      { "tier": 1, "levels": [1], "style": "Timber log cabin with workbench, hand saws, and pine shingles." },
+      { "tier": 2, "levels": [2, 3], "style": "Red-brick workshop with cast-iron anvil, masonry tools, and slate gabled roof." },
+      { "tier": 3, "levels": [4, 5], "style": "Steel frame industrial depot with motorized crane hoist and pneumatic jackhammers." },
+      { "tier": 4, "levels": [6, 7], "style": "Prefabricated architectural engineering office with blue neon blueprint screens." },
+      { "tier": 5, "levels": [8, 9], "style": "Cybernetic automation bay housing robotic construction drones and welding lasers." },
+      { "tier": 6, "levels": [10, 11], "style": "Adamantium fabrication station with subatomic metal synthesizers." },
+      { "tier": 7, "levels": [12], "style": "Quantum crystalline nano-hive with self-replicating builder bots." }
+    ],
+    "roadblock": [
+      { "tier": 1, "levels": [1], "style": "Heavy wooden beam sawhorses and log barricades." },
+      { "tier": 2, "levels": [2, 3], "style": "Heavy granite stone roadblocks with red-white reflectors." },
+      { "tier": 3, "levels": [4, 5], "style": "Cast concrete Jersey barriers with yellow-black hazard stripes." },
+      { "tier": 4, "levels": [6, 7], "style": "Steel dragon's teeth and reinforced concrete tire-puncturing wedges." },
+      { "tier": 5, "levels": [8, 9], "style": "Hydraulic retractable steel ramps with glowing hazard warning strips." },
+      { "tier": 6, "levels": [10, 11], "style": "Magnetized heavy adamantium barricades that decelerate vehicles on approach." },
+      { "tier": 7, "levels": [12], "style": "Kinetic repulsion force-walls that violently bounce ramming vehicles backward." }
+    ]
+  }
+}

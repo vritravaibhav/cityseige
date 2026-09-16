@@ -1,0 +1,31 @@
+{
+  "name": "patent-analyst-freelance-engine",
+  "version": "1.0.0",
+  "description": "Automated freelance lead discovery, proposal generation, and SMTP outreach engine for Patent Analysts & IP Specialists",
+  "main": "scan.js",
+  "scripts": {
+    "scan": "node scan.js",
+    "build": "node build.js",
+    "pipeline": "node scan.js && node build.js",
+    "preview": "node send-outreach.js --preview",
+    "mail:verify": "node send-outreach.js --verify",
+    "mail:send": "node send-outreach.js --send",
+    "game": "npm --prefix city-siege-3d run dev",
+    "game:build": "npm --prefix city-siege-3d run build"
+  },
+  "keywords": [
+    "patent-analyst",
+    "freelance",
+    "lead-generation",
+    "prior-art",
+    "claim-charting",
+    "smtp-outreach",
+    "ip-consulting"
+  ],
+  "author": "Divyanshu Vaibhav",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "nodemailer": "^6.10.0"
+  }
+}

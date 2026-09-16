@@ -1,0 +1,90 @@
+[
+  {
+    "id": "firm-apex-ip",
+    "name": "Apex IP Law Group",
+    "contactName": "David Miller",
+    "contactRole": "Managing Partner & Patent Attorney",
+    "email": "dmiller@apexip-law.com",
+    "website": "https://apexip-law.com",
+    "specialty": "Electronics, Semiconductor & Computer Architecture Patents",
+    "location": "San Jose, CA, USA",
+    "pitchAngle": "Outsourced 102/103 invalidity claim charting and standards-essential patent (NVMe, IEEE) technical mapping."
+  },
+  {
+    "id": "firm-vanguard-patents",
+    "name": "Vanguard Patent Practice",
+    "contactName": "Sarah Jenkins",
+    "contactRole": "Principal IP Attorney",
+    "email": "sjenkins@vanguardpatents.com",
+    "website": "https://vanguardpatents.com",
+    "specialty": "Software Architectures, AI/ML, and Telecommunications",
+    "location": "Austin, TX, USA",
+    "pitchAngle": "Rapid-turnaround novelty & patentability prior art searches across USPTO, EPO, and non-patent literature."
+  },
+  {
+    "id": "firm-matrix-ip",
+    "name": "Matrix Intellectual Property Solutions",
+    "contactName": "Marcus Sterling",
+    "contactRole": "Head of Patent Prosecution",
+    "email": "msterling@matrixip-counsel.com",
+    "website": "https://matrixip-counsel.com",
+    "specialty": "Hardware, IoT, Flash Memory & SSD Controllers",
+    "location": "Boston, MA, USA",
+    "pitchAngle": "Technical evidence-to-claim limitation mapping and freedom-to-operate clearance studies."
+  },
+  {
+    "id": "firm-clarity-ip",
+    "name": "Clarity IP Partners",
+    "contactName": "Elena Rostova",
+    "contactRole": "Partner, Patent Litigation & Counseling",
+    "email": "erostova@clarityip-partners.co.uk",
+    "website": "https://clarityip-partners.co.uk",
+    "specialty": "Wireless Communications, 5G/LTE, Digital Signal Processing",
+    "location": "London, UK",
+    "pitchAngle": "Multi-jurisdictional prior art searching (USPTO, EPO, WIPO) and citation tree analysis."
+  },
+  {
+    "id": "firm-beacon-patent",
+    "name": "Beacon Patent & Technology Counsel",
+    "contactName": "Robert Chen",
+    "contactRole": "Founder & Registered Patent Attorney",
+    "email": "rchen@beacontech-patents.com",
+    "website": "https://beacontech-patents.com",
+    "specialty": "Deep Tech Startups & Hardware Ventures",
+    "location": "Seattle, WA, USA",
+    "pitchAngle": "Cost-effective prior art clearance for early-stage startup patent filings and landscape analysis."
+  },
+  {
+    "id": "firm-cortex-ip",
+    "name": "Cortex IP Legal Advisors",
+    "contactName": "Alexander Wright",
+    "contactRole": "Senior Patent Counsel",
+    "email": "awright@cortexip-legal.com",
+    "website": "https://cortexip-legal.com",
+    "specialty": "Semiconductor Packaging, IC Design, and Memory Subsystems",
+    "location": "Dallas, TX, USA",
+    "pitchAngle": "Claim charting against public datasheets, standards specs, and tear-downs."
+  },
+  {
+    "id": "firm-novus-patent",
+    "name": "Novus Patent Associates",
+    "contactName": "Claire Dubois",
+    "contactRole": "European Patent Attorney (EPA)",
+    "email": "cdubois@novuspatent.eu",
+    "website": "https://novuspatent.eu",
+    "specialty": "Telecommunications & Embedded Systems",
+    "location": "Munich, Germany",
+    "pitchAngle": "EPO opposition prior art search and problem-solution approach invalidity evidence."
+  },
+  {
+    "id": "firm-sentinel-ip",
+    "name": "Sentinel IP Defense Group",
+    "contactName": "Gregory Vance",
+    "contactRole": "Chair of IP Litigation Support",
+    "email": "gvance@sentinelip-defense.com",
+    "website": "https://sentinelip-defense.com",
+    "specialty": "Data Storage, Enterprise SSDs, PCIe/NVMe Protocols",
+    "location": "Chicago, IL, USA",
+    "pitchAngle": "Deep-dive factual claim 1 limitation mapping and non-patent literature retrieval."
+  }
+]

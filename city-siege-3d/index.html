@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>City Siege 3D - Countryside to Metropolis</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <!-- 3D Three.js WebGL Container -->
+  <div id="canvas-container"></div>
+
+  <!-- UI Overlay -->
+  <div id="ui-container">
+
+    <!-- ================= 1. HOME SCREEN VIEW ================= -->
+    <div id="home-view">
+      <!-- Top Navigation & Resources -->
+      <div class="builder-top-bar">
+        <div class="city-brand">
+          <div class="brand-icon">🌆</div>
+          <div>
+            <div class="brand-title">CITY SIEGE 3D</div>
+            <div class="brand-subtitle">Countryside to Metropolis</div>
+          </div>
+        </div>
+
+        <!-- Bank Balances (Static - tap factories to collect!) -->
+        <div class="resource-tickers">
+          <div class="res-item" title="Player Bank: Cash">
+            <span class="res-icon">💰</span>
+            <span id="res-cash" class="res-val">1,500</span>
+          </div>
+          <div class="res-item" title="Player Bank: Iron">
+            <span class="res-icon">⚙️</span>
+            <span id="res-iron" class="res-val">800</span>
+          </div>
+          <div class="res-item" title="Player Bank: Wood">
+            <span class="res-icon">🪵</span>
+            <span id="res-wood" class="res-val">1,000</span>
+          </div>
+          <div id="builder-status-widget" class="res-item builder-status-badge" title="Hire a Labour / Active Labourers Available">
+            <span class="res-icon">👷</span>
+            <span id="builder-count" class="res-val" style="color: #ffd700; font-weight: 700;">2 / 2 Labour Free</span>
+          </div>
+        </div>
+
+        <!-- Sound Toggle -->
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button id="btn-toggle-sound" class="tool-btn sound-toggle-btn" title="Toggle Audio">
+            <span id="sound-icon">🔊</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Home Action Dock (Centered at bottom: Attack, Shop, Design Map) -->
+      <div class="home-action-dock">
+        <button id="btn-attack-city" class="btn-home-action btn-attack-glow">
+          <span class="action-icon">⚔️</span>
+          <div class="action-text">
+            <span class="action-title">ATTACK CITY</span>
+            <span class="action-sub">Recon & Breach</span>
+          </div>
+        </button>
+
+        <button id="btn-open-shop" class="btn-home-action btn-shop-glow">
+          <span class="action-icon">🛒</span>
+          <div class="action-text">
+            <span class="action-title">CITY SHOP</span>
+            <span class="action-sub">Buy Fortifications</span>
+          </div>
+        </button>
+
+        <button id="btn-open-design" class="btn-home-action btn-design-glow">
+          <span class="action-icon">🗺️</span>
+          <div class="action-text">
+            <span class="action-title">DESIGN MAP</span>
+            <span class="action-sub">Build from Scratch</span>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= 2. DESIGN MAP SCREEN VIEW ================= -->
+    <div id="design-view" class="hidden">
+      <!-- Top Architect Bar -->
+      <div class="design-top-bar">
+        <div class="design-brand">
+          <div class="brand-icon">🗺️</div>
+          <div>
+            <div class="brand-title">CITY ARCHITECT STUDIO</div>
+            <div class="brand-subtitle">Draw roads, place purchased buildings from inventory, or move structures</div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button id="btn-open-presets" class="tool-btn">
+            <span>📐</span> Quick Templates
+          </button>
+          <button id="btn-clear-roads-design" class="tool-btn btn-danger-soft">
+            <span>🧹</span> Clear Roads
+          </button>
+          <button id="btn-exit-design" class="btn-primary" style="padding: 9px 20px; font-size: 13px; letter-spacing: 0.5px;">
+            <span>✓</span> FINISH & RETURN TO CITY
+          </button>
+        </div>
+      </div>
+
+      <!-- Left Tool Dock (Draw Roads / Erase Roads / Relocate) -->
+      <div class="left-tools-dock">
+        <button id="btn-design-road" class="tool-btn">
+          <span>🛣️</span> Draw Roads (Drag)
+        </button>
+        <button id="btn-design-erase" class="tool-btn">
+          <span>🧹</span> Erase Roads
+        </button>
+        <button id="btn-design-select" class="tool-btn active">
+          <span>🔍</span> Select / Move
+        </button>
+      </div>
+
+      <!-- Bottom Construction Inventory Drawer (Only shows purchased items ready to place!) -->
+      <div class="design-bottom-drawer">
+        <div class="design-drawer-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-weight: 800; font-size: 14px; color: var(--accent-cyan);">📦 CONSTRUCTION INVENTORY</span>
+            <span style="font-size: 11px; color: var(--text-dim);">(Click an item, then click map to place)</span>
+          </div>
+          <button id="btn-quick-shop" class="btn-secondary" style="padding: 5px 14px; font-size: 11px;">
+            + Buy More in Shop 🛒
+          </button>
+        </div>
+
+        <div id="inventory-items-list" class="inventory-items-list">
+          <!-- Populated dynamically from EconomyManager inventory -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Harvest Reward Container (for floating +50 Wood animations) -->
+    <div id="floating-harvest-container" class="floating-harvest-container"></div>
+
+    <!-- Building Inspector Modal (View stats, upgrade tier, move, stow into inventory) -->
+    <div id="inspector-modal" class="inspector-modal hidden">
+      <div id="inspector-content">
+        <!-- Populated when building clicked -->
+      </div>
+    </div>
+
+    <!-- ================= 3. BLUEPRINT & CONSTRUCTION SHOP MODAL ================= -->
+    <div id="blueprint-shop-modal" class="modal-backdrop hidden">
+      <div class="recon-box shop-modal-box">
+        <div class="shop-header">
+          <div>
+            <h2>🛒 BLUEPRINT & FORTIFICATIONS SHOP</h2>
+            <p>Purchase buildings and defenses into your Construction Inventory, then place them in Design Map.</p>
+          </div>
+          <!-- Shop Live Resource Display -->
+          <div class="resource-tickers shop-res-display">
+            <div class="res-item">
+              <span class="res-icon">💰</span>
+              <span id="shop-res-cash" class="res-val">1,500</span>
+            </div>
+            <div class="res-item">
+              <span class="res-icon">⚙️</span>
+              <span id="shop-res-iron" class="res-val">800</span>
+            </div>
+            <div class="res-item">
+              <span class="res-icon">🪵</span>
+              <span id="shop-res-wood" class="res-val">1,000</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Shop Filter Tabs -->
+        <div class="shop-tabs">
+          <button class="shop-tab-btn active" data-cat="all">ALL BLUEPRINTS</button>
+          <button class="shop-tab-btn" data-cat="roads">🛣️ ROADS & PAVEMENT</button>
+          <button class="shop-tab-btn" data-cat="defense">DEFENSES & TRAPS</button>
+          <button class="shop-tab-btn" data-cat="economy">FACTORIES & RESOURCES</button>
+          <button class="shop-tab-btn" data-cat="civil">CIVIL & NATURE</button>
+        </div>
+
+        <div id="blueprint-items-container" class="blueprint-items-grid">
+          <!-- Rendered dynamically by UIManager -->
+        </div>
+
+        <div class="shop-footer">
+          <button id="btn-close-shop" class="btn-secondary">← BACK TO CITY</button>
+          <button id="btn-shop-to-design" class="btn-primary">PROCEED TO DESIGN MAP 🗺️</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 4. QUICK TEMPLATES / PRESETS MODAL ================= -->
+    <div id="redesign-modal" class="modal-backdrop hidden">
+      <div class="recon-box">
+        <div class="recon-header">
+          <h2>📐 QUICK ARCHITECTURAL TEMPLATES</h2>
+          <p>Optional full layouts. You can also build entirely from scratch in Design Map.</p>
+        </div>
+        <div class="presets-row">
+          <div class="preset-card">
+            <h3>🏰 Fortified Citadel</h3>
+            <p>Concentric ring defense with fortified main gates and central Town Hall.</p>
+            <button class="btn-primary btn-apply-preset" data-preset="citadel">Apply Citadel</button>
+          </div>
+          <div class="preset-card">
+            <h3>🌆 Grid Metropolis</h3>
+            <p>Modern grid avenues, commercial hubs, high factory throughput.</p>
+            <button class="btn-primary btn-apply-preset" data-preset="metropolis">Apply Metropolis</button>
+          </div>
+          <div class="preset-card">
+            <h3>🌲 Countryside Outpost</h3>
+            <p>Winding diagonal trails, decentralized farms, and hidden roadblocks.</p>
+            <button class="btn-primary btn-apply-preset" data-preset="valley">Apply Outpost</button>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: center; gap: 14px; margin-top: 24px;">
+          <button id="btn-close-redesign" class="btn-secondary">Close Templates</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 5. COMBAT HUD (TPP DRIVING & WEAPONS) ================= -->
+    <div id="combat-hud" class="hidden">
+      <!-- Top Destruction Progress Tracker -->
+      <div class="combat-top-tracker">
+        <div class="tracker-row">
+          <span class="tracker-title">🔥 CITY DESTRUCTION</span>
+          <div id="hud-stars" class="stars-display">
+            <span class="star-dim">⭐</span>
+            <span class="star-dim">⭐</span>
+            <span class="star-dim">⭐</span>
+          </div>
+        </div>
+        <div class="bar-container">
+          <div id="hud-destruct-fill" class="bar-fill-destruction"></div>
+        </div>
+        <div class="loot-ticker">
+          <span>Damage: <strong id="hud-destruct-text">0%</strong></span>
+          <span>💰 Stolen: <strong id="loot-cash">0</strong></span>
+          <span>⚙️ Iron: <strong id="loot-iron">0</strong></span>
+          <span>🪵 Wood: <strong id="loot-wood">0</strong></span>
+          <span>🚨 Cops Wrecked: <strong id="cops-wrecked">0</strong></span>
+        </div>
+      </div>
+
+      <!-- Bottom Left Vehicle Gauges -->
+      <div class="vehicle-gauges">
+        <div class="speedometer">
+          <span id="hud-speed-val" class="speed-val">0 MPH</span>
+          <span class="speed-unit">BATTLE BUGGY</span>
+        </div>
+        <div class="gauge-row">
+          <div class="gauge-label">
+            <span>ARMOR HP</span>
+            <span id="hud-hp-text">500 / 500</span>
+          </div>
+          <div class="bar-container">
+            <div id="hud-hp-fill" class="bar-fill-hp"></div>
+          </div>
+        </div>
+        <div class="gauge-row">
+          <div class="gauge-label">
+            <span>SHIELD</span>
+          </div>
+          <div class="bar-container">
+            <div id="hud-shield-fill" class="bar-fill-shield"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Center Action Card Deck -->
+      <div id="action-cards-container" class="action-cards-container">
+        <!-- Rendered by CardSystem & UIManager -->
+      </div>
+
+      <!-- Top Right Tactical Radar Scanner -->
+      <div class="combat-radar-container">
+        <canvas id="radar-canvas" width="150" height="150"></canvas>
+        <div class="radar-label">POLICE & THREAT SCANNER</div>
+      </div>
+
+      <!-- Primary Weapon Fire Button (HUD) -->
+      <div class="vehicle-fire-dock">
+        <button id="btn-fire-cannon" class="btn-fire-pulse" title="Fire Mounted Cannon (F / Click / Space)">
+          <span style="font-size: 20px;">🎯</span>
+          <span>ATTACK / FIRE CANNON</span>
+        </button>
+      </div>
+
+      <!-- Bottom Right Touch Driving Pedals / Steer Controls -->
+      <div class="touch-driving-controls">
+        <div class="touch-steer-group">
+          <button id="touch-left" class="touch-btn">◀</button>
+          <button id="touch-right" class="touch-btn">▶</button>
+        </div>
+        <div class="touch-pedals-group">
+          <button id="touch-brake" class="touch-btn pedal-brake" title="Reverse / Brake">REV</button>
+          <button id="touch-drift" class="touch-btn pedal-drift" title="Drift / Handbrake">DRIFT</button>
+          <button id="touch-jump" class="touch-btn pedal-jump" title="Big Jump Over Obstacles (Space / 4)">🦘 JUMP</button>
+          <button id="touch-fire" class="touch-btn pedal-fire" title="Fire Plasma Cannons (F / Click)">🔥 FIRE</button>
+          <button id="touch-gas" class="touch-btn pedal-gas" title="Accelerate">GAS</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 6. TACTICAL SATELLITE RECON BANNER ================= -->
+    <div id="tactical-recon-banner" class="tactical-banner hidden">
+      <div class="banner-title">🛰️ TACTICAL SATELLITE SCAN ACTIVE</div>
+      <div class="banner-sub">TAP DIRECTLY ON ANY MAIN GATE ON THE 3D MAP TO LAUNCH THE ASSAULT</div>
+      <button id="btn-abort-recon" class="btn-secondary" style="margin-top: 10px; padding: 6px 16px; font-size: 12px;">ABORT RECON</button>
+    </div>
+
+    <!-- ================= 7. HIGH-TECH MAPPING SCANLINE OVERLAY ================= -->
+    <div id="mapping-scan-overlay" class="scan-overlay hidden">
+      <div class="scan-grid"></div>
+      <div class="scan-line"></div>
+      <div class="scan-telemetry">
+        <div class="scan-label">TARGET SECTOR LOCKED</div>
+        <div id="scan-gate-name" class="scan-target">NORTH GATE</div>
+        <div class="scan-status">CALIBRATING INGRESS TRAJECTORY... BREACH INCOMING</div>
+      </div>
+    </div>
+
+    <!-- ================= RESULT / CARNAGE SUMMARY MODAL ================= -->
+    <div id="result-modal" class="modal-backdrop hidden">
+      <div class="result-box">
+        <div id="result-content">
+          <!-- Populated by UIManager when vehicle crashes -->
+        </div>
+      </div>
+    </div>
+
+    <!-- UI Toast Notification -->
+    <div id="ui-toast" class="ui-toast hidden"></div>
+
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
