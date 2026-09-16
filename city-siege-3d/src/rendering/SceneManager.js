@@ -79,6 +79,7 @@ export class SceneManager {
     this.swoopTween = null;
 
     this._initBuilderCameraControls();
+    this._initReconCameraControls();
   }
 
   panBy(dxPx, dyPx) {
@@ -308,7 +309,8 @@ export class SceneManager {
   }
 
   _initGround() {
-    const groundSize = 340;
+    // Large enough that the tactical map can be panned/zoomed without the edge of the world showing.
+    const groundSize = 760;
 
     // Grass & Terrain Plane (Lush, vibrant countryside landscape)
     const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
@@ -393,6 +395,125 @@ export class SceneManager {
    * The scene now uses a Sky mesh, so scene.background is null in daylight - writing
    * background.setHex() directly would throw.
    */
+  /**
+   * Frame the recon camera so EVERY gate is on screen with breathing room around it.
+   * The old fixed position (0,155,85) put the south gate at z=+60 right on the bottom edge,
+   * so you could not see - let alone tap - one of the three gates you are meant to choose from.
+   * Recomputed per recon so it adapts if gates are moved or added.
+   */
+  frameReconOnTargets(points, padding = 1.55) {
+    const cam = this.reconCamera;
+
+    let maxR = 0;
+    (points || []).forEach(p => {
+      if (!p) return;
+      maxR = Math.max(maxR, Math.hypot(p.x, p.z));
+    });
+    if (maxR <= 0) maxR = 65;
+
+    const needed = maxR * padding;
+
+    // The tighter of the two frustum axes governs what actually fits.
+    const vFov = (cam.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * cam.aspect);
+    const fov = Math.min(vFov, hFov);
+
+    const dist = needed / Math.tan(fov / 2);
+
+    // Mostly overhead, with a slight tilt so the city still reads as 3D rather than a blueprint.
+    const tilt = 0.30;
+    const h = dist / Math.sqrt(1 + tilt * tilt);
+
+    // Aim slightly north of centre so the whole city sits BELOW the tactical recon banner,
+    // which is pinned to the top of the screen and would otherwise cover the north gate beacon.
+    const aimZ = -maxR * 0.16;
+
+    cam.position.set(0, h, h * tilt);
+    if (!this.reconTarget) this.reconTarget = new THREE.Vector3();
+    if (!this.reconDir) this.reconDir = new THREE.Vector3();
+    this.reconTarget.set(0, 0, aimZ);
+    // Fixed view direction (target -> camera). Pan translates along the ground, zoom dollies
+    // along this vector; neither may rotate the map, so it is captured once here.
+    this.reconDir.copy(cam.position).sub(this.reconTarget).normalize();
+    this.reconDist = cam.position.distanceTo(this.reconTarget);
+    cam.lookAt(this.reconTarget);
+    cam.updateProjectionMatrix();
+  }
+
+  /** Place the recon camera `dist` along the fixed view direction from reconTarget. */
+  _applyReconView(dist) {
+    const cam = this.reconCamera;
+    this.reconDist = Math.max(45, Math.min(420, dist));
+    cam.position.copy(this.reconTarget).addScaledVector(this.reconDir, this.reconDist);
+    cam.lookAt(this.reconTarget);
+  }
+
+  /**
+   * Tactical map controls while choosing a gate: drag to pan, wheel / pinch to zoom.
+   * Only live while the recon camera is active; the builder controls guard on their own camera.
+   */
+  _initReconCameraControls() {
+    if (!this.reconTarget) this.reconTarget = new THREE.Vector3();
+    const isRecon = () => this.activeCamera === this.reconCamera;
+    const onUI = (e) => e.target && e.target.closest && e.target.closest('#ui-container button');
+    let dragging = false;
+    let last = { x: 0, y: 0 };
+    const PAN_LIMIT = 130;
+
+    const worldPerPixel = () => {
+      const dist = this.reconCamera.position.distanceTo(this.reconTarget);
+      const vFov = (this.reconCamera.fov * Math.PI) / 180;
+      return (2 * dist * Math.tan(vFov / 2)) / window.innerHeight;
+    };
+    const panBy = (dxPx, dyPx) => {
+      const wpp = worldPerPixel();
+      this.reconTarget.x -= dxPx * wpp;
+      this.reconTarget.z -= dyPx * wpp;
+      const r = Math.hypot(this.reconTarget.x, this.reconTarget.z);
+      if (r > PAN_LIMIT) { this.reconTarget.x *= PAN_LIMIT / r; this.reconTarget.z *= PAN_LIMIT / r; }
+      this._applyReconView(this.reconDist);
+    };
+
+    window.addEventListener('pointerdown', (e) => {
+      if (!isRecon() || onUI(e) || e.button !== 0) return;
+      dragging = true;
+      last = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!dragging || !isRecon()) return;
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      last = { x: e.clientX, y: e.clientY };
+      if (dx || dy) panBy(dx, dy);
+    });
+    window.addEventListener('pointerup', () => { dragging = false; });
+    window.addEventListener('pointercancel', () => { dragging = false; });
+
+    window.addEventListener('wheel', (e) => {
+      if (!isRecon()) return;
+      e.preventDefault();
+      this._applyReconView(this.reconDist * (e.deltaY > 0 ? 1.12 : 1 / 1.12));
+    }, { passive: false });
+
+    // Touch pinch zoom
+    let pinchStart = 0;
+    let pinchDist0 = 0;
+    window.addEventListener('touchstart', (e) => {
+      if (!isRecon() || e.touches.length !== 2) return;
+      e.preventDefault();
+      pinchStart = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      pinchDist0 = this.reconDist;
+      dragging = false;
+    }, { passive: false });
+    window.addEventListener('touchmove', (e) => {
+      if (!isRecon() || e.touches.length !== 2 || pinchStart <= 0) return;
+      e.preventDefault();
+      const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      if (d > 5) this._applyReconView(pinchDist0 * (pinchStart / d));
+    }, { passive: false });
+    window.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinchStart = 0; });
+  }
+
   _setSkyMood(isDaylight) {
     if (this.sky) this.sky.visible = isDaylight;
     this.scene.background = isDaylight ? null : this.nightBackdrop;

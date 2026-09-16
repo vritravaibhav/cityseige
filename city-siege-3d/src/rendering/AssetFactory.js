@@ -439,6 +439,115 @@ export class AssetFactory {
     return group;
   }
 
+  // --- RUBBLE ---
+
+  /**
+   * What a razed structure leaves behind: a low scatter of broken slabs. Deliberately small so
+   * the map stays readable, but solid enough to act as a vehicle barrier.
+   */
+  createRubble(footprint = 1) {
+    const group = new THREE.Group();
+    group.name = 'rubble';
+    group.userData.isRubble = true;
+
+    const spread = 0.9 + footprint * 0.5;
+    const mats = [this.materials.stone, this.materials.concrete, this.materials.ironDark, this.materials.brickRed];
+    const pieces = 5 + footprint * 2;
+    for (let i = 0; i < pieces; i++) {
+      const a = (i / pieces) * Math.PI * 2 + (i % 3) * 0.4;
+      const r = spread * (0.25 + ((i * 7) % 5) / 6);
+      const sx = 0.35 + ((i * 3) % 4) * 0.12;
+      const sy = 0.16 + ((i * 5) % 3) * 0.07;
+      const sz = 0.3 + ((i * 2) % 4) * 0.11;
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mats[i % mats.length]);
+      slab.position.set(Math.cos(a) * r, sy / 2, Math.sin(a) * r);
+      slab.rotation.set(((i * 11) % 7) * 0.08, a, ((i * 13) % 5) * 0.09);
+      slab.castShadow = true;
+      slab.receiveShadow = true;
+      group.add(slab);
+    }
+    // Scorched footprint
+    const scorch = new THREE.Mesh(new THREE.CircleGeometry(spread * 0.95, 14), this.materials.asphalt);
+    scorch.rotation.x = -Math.PI / 2;
+    scorch.position.y = 0.02;
+    group.add(scorch);
+    return group;
+  }
+
+  // --- STORAGE ---
+
+  /**
+   * Big Storage Depot - warehouse where stowed structures are kept.
+   * Tier 1 timber shed -> Tier 2 corrugated steel warehouse -> Tier 3 automated container yard.
+   */
+  createBigStorage(level = 1) {
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+    const group = new THREE.Group();
+    group.name = 'big_storage';
+    group.userData.isStorage = true;
+
+    const wallMat = lvl === 1 ? this.materials.woodDark : lvl === 2 ? this.materials.concrete : this.materials.ironDark;
+    const w = 4.4 + lvl * 0.35;
+    const d = 3.2 + lvl * 0.25;
+    const h = 2.2 + lvl * 0.35;
+
+    // Main warehouse shell
+    const shell = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+    shell.position.y = h / 2;
+    shell.castShadow = true;
+    group.add(shell);
+
+    // Barrel roof (a half cylinder reads as a depot rather than another box)
+    const roof = new THREE.Mesh(
+      new THREE.CylinderGeometry(d * 0.52, d * 0.52, w, 12, 1, false, 0, Math.PI),
+      lvl === 3 ? this.materials.steel : this.materials.logRoof
+    );
+    roof.rotation.z = Math.PI / 2;
+    roof.position.y = h;
+    roof.castShadow = true;
+    group.add(roof);
+
+    // Roller shutter door
+    const door = new THREE.Mesh(new THREE.BoxGeometry(w * 0.38, h * 0.62, 0.14), this.materials.steel);
+    door.position.set(0, h * 0.31, d / 2 + 0.05);
+    group.add(door);
+
+    // Hazard kerb marking the loading bay
+    const kerb = new THREE.Mesh(new THREE.BoxGeometry(w * 0.46, 0.09, 0.7), this.materials.hazardStripe);
+    kerb.position.set(0, 0.05, d / 2 + 0.55);
+    group.add(kerb);
+
+    // Stacked crates outside - visual shorthand for "things are stored here"
+    const crateCount = lvl + 1;
+    for (let i = 0; i < crateCount; i++) {
+      const size = 0.55 + (i % 2) * 0.12;
+      const crate = new THREE.Mesh(
+        new THREE.BoxGeometry(size, size, size),
+        i % 2 === 0 ? this.materials.woodLight : this.materials.brickRed
+      );
+      crate.position.set(-w / 2 + 0.45 + i * 0.66, size / 2, -d / 2 - 0.5);
+      crate.rotation.y = i * 0.3;
+      crate.castShadow = true;
+      group.add(crate);
+    }
+
+    if (lvl >= 2) {
+      // Loading gantry
+      const gantry = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.16, 0.16), this.materials.steel);
+      gantry.position.set(0, h + d * 0.52 + 0.3, d / 2 - 0.2);
+      group.add(gantry);
+    }
+
+    if (lvl >= 3) {
+      // Automated inventory readout
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 0.08), this.materials.neonCyan);
+      panel.position.set(w / 2 - 0.7, h * 0.62, d / 2 + 0.06);
+      group.add(panel);
+    }
+
+    return group;
+  }
+
   // --- RESEARCH LABS ---
 
   createVehicleLab(level = 1) {

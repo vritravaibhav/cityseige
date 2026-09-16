@@ -32,6 +32,8 @@ export class GridSystem {
 
     this.maxCityRadius = 15; // Grid radius in tiles (~82.5m, within fortified walls)
     this.onSelectBuilding = null;
+    this.dragBuilding = null;
+    this.dragOrigin = null;
     this.onHarvest = null;
     this.onInventoryPlaced = null;
     this.onOutOfRoads = null;
@@ -159,10 +161,42 @@ export class GridSystem {
     const { gx, gz } = this.worldToGrid(worldPoint);
     this.lastGridTile = { gx, gz };
 
+    // Press on a structure = pick it up and drag it. Works on the city screen AND in the
+    // design map, so any placed building can simply be dragged to a new spot.
+    if (this.mode === 'home' || this.mode === 'design_select') {
+      const hit = this.findBuildingFromRaycast(event);
+      if (hit && this.isDraggableBuilding(hit)) {
+        this.dragBuilding = hit;
+        this.dragOrigin = { gx: hit.gx, gz: hit.gz };
+      }
+    }
+
     // In road drawing/erasing or inventory placement, execute action immediately
     if (this.mode === 'draw_road' || this.mode === 'erase_road' || this.mode === 'place_inventory' || this.mode === 'relocate') {
       this.handleTileAction(gx, gz, worldPoint, event);
     }
+  }
+
+  /**
+   * Main gates are anchored to the perimeter wall (they ARE the breach points), so they stay put.
+   * Everything else the player placed can be dragged.
+   */
+  isDraggableBuilding(b) {
+    return !!b && !b.isMainGate && b.type !== 'main_gate' && !b.isUnderConstruction;
+  }
+
+  /** Pure scenery - never blocks a structure from being placed or dropped on that tile. */
+  isDecoration(b) {
+    return !!b && b.type === 'tree';
+  }
+
+  /** A tile is a legal drop target if it is inside the city and not on top of another structure. */
+  isValidDropTile(building, gx, gz) {
+    if (Math.hypot(gx, gz) > this.maxCityRadius) return false;
+    return !this.buildingManager.buildings.some(o =>
+      o !== building && !o.isDestroyed && !this.isDecoration(o) &&
+      Math.abs(o.gx - gx) <= 1 && Math.abs(o.gz - gz) <= 1
+    );
   }
 
   onPointerMove(event) {
@@ -196,6 +230,30 @@ export class GridSystem {
       }
     }
 
+    // DRAGGING A BUILDING: the structure follows the cursor and previews where it will land.
+    if (this.isPointerDown && this.dragBuilding && worldPoint) {
+      const totalDist = Math.hypot(
+        event.clientX - this.pointerStartPos.x,
+        event.clientY - this.pointerStartPos.y
+      );
+      if (totalDist > 4) this.hasMovedPastThreshold = true;
+
+      if (this.hasMovedPastThreshold) {
+        const { gx, gz } = this.worldToGrid(worldPoint);
+        const ok = this.isValidDropTile(this.dragBuilding, gx, gz);
+
+        if (this.dragBuilding.mesh) {
+          // Lift it slightly so it reads as "in hand", and tint the tile cursor by validity.
+          this.dragBuilding.mesh.position.set(gx * this.tileSize, ok ? 0.6 : 0.3, gz * this.tileSize);
+        }
+        this.cursorMesh.visible = true;
+        this.cursorMesh.position.set(gx * this.tileSize, 0.12, gz * this.tileSize);
+        this.cursorMesh.material.color.setHex(ok ? 0x00e676 : 0xff1744);
+        document.body.style.cursor = 'grabbing';
+      }
+      return; // never pan the camera while carrying a building
+    }
+
     // DRAGGING MAP: In Home Screen mode or Design Select mode, drag pans the camera!
     if (this.isPointerDown && (this.mode === 'home' || this.mode === 'design_select')) {
       const dx = event.clientX - this.pointerCurrentPos.x;
@@ -222,6 +280,34 @@ export class GridSystem {
     if (!this.isPointerDown) return;
     this.isPointerDown = false;
     document.body.style.cursor = '';
+
+    // Release while carrying a building = drop it.
+    if (this.dragBuilding) {
+      const b = this.dragBuilding;
+      this.dragBuilding = null;
+      this.cursorMesh.visible = false;
+
+      if (this.hasMovedPastThreshold) {
+        const worldPoint = this.getWorldIntersection(event);
+        const target = worldPoint ? this.worldToGrid(worldPoint) : null;
+        if (target && this.isValidDropTile(b, target.gx, target.gz)) {
+          this.buildingManager.moveBuilding(b, target.gx, target.gz);
+          if (b.bubbleMesh) {
+            b.bubbleMesh.position.set(target.gx * this.tileSize, 5.0, target.gz * this.tileSize);
+          }
+          this.sound.playPlace();
+        } else {
+          // Illegal drop - put it back exactly where it came from.
+          this.buildingManager.moveBuilding(b, this.dragOrigin.gx, this.dragOrigin.gz);
+          this.sound.playCrash(0.3);
+        }
+
+        this.lastGridTile = null;
+        this.hasMovedPastThreshold = false;
+        return;
+      }
+      // Not dragged far enough - fall through so it counts as a normal tap.
+    }
 
     // If in home or design_select mode and user DID NOT drag past threshold, it was a click/tap!
     if ((this.mode === 'home' || this.mode === 'design_select') && !this.hasMovedPastThreshold) {
@@ -321,8 +407,20 @@ export class GridSystem {
         return;
       }
 
+      // Town Hall gating also applies at placement time, so items bought before a downgrade
+      // (or seeded into inventory) still cannot appear above your city tier.
+      const defForType = this.buildingManager.catalog[type];
+      const reqTH = defForType && defForType.unlockTownHall ? defForType.unlockTownHall : 1;
+      if (this.buildingManager.getTownHallLevel() < reqTH) {
+        alert(`${defForType ? defForType.name : type} unlocks at Town Hall ${reqTH}. Upgrade your Town Hall first.`);
+        this.setMode('design_select');
+        return;
+      }
+
       // Check if tile is occupied by an existing building
+      // Trees are scenery and used to block placement across most of the map.
       const occupied = this.buildingManager.buildings.some(b => {
+        if (this.isDecoration(b) || b.isDestroyed) return false;
         return Math.abs(b.gx - gx) <= 1 && Math.abs(b.gz - gz) <= 1;
       });
       if (occupied) {

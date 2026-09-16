@@ -148,47 +148,59 @@
     </div>
 
     <!-- ================= 3. BLUEPRINT & CONSTRUCTION SHOP MODAL ================= -->
-    <div id="blueprint-shop-modal" class="modal-backdrop hidden">
-      <div class="recon-box shop-modal-box">
-        <div class="shop-header">
+    <!-- ================= 3. BLUEPRINT & FORTIFICATIONS SHOP (FULL SCREEN) ================= -->
+    <div id="shop-view" class="shop-screen hidden">
+      <header class="shop-topbar">
+        <div class="shop-brand">
+          <div class="shop-brand-icon">🛒</div>
           <div>
-            <h2>🛒 BLUEPRINT & FORTIFICATIONS SHOP</h2>
-            <p>Purchase buildings and defenses into your Construction Inventory, then place them in Design Map.</p>
-          </div>
-          <!-- Shop Live Resource Display -->
-          <div class="resource-tickers shop-res-display">
-            <div class="res-item">
-              <span class="res-icon">💰</span>
-              <span id="shop-res-cash" class="res-val">1,500</span>
-            </div>
-            <div class="res-item">
-              <span class="res-icon">⚙️</span>
-              <span id="shop-res-iron" class="res-val">800</span>
-            </div>
-            <div class="res-item">
-              <span class="res-icon">🪵</span>
-              <span id="shop-res-wood" class="res-val">1,000</span>
-            </div>
+            <div class="shop-brand-title">BLUEPRINT &amp; FORTIFICATIONS SHOP</div>
+            <div class="shop-brand-sub">Buy blueprints into your Construction Inventory, then place them in the Design Map.</div>
           </div>
         </div>
 
-        <!-- Shop Filter Tabs -->
-        <div class="shop-tabs">
-          <button class="shop-tab-btn active" data-cat="all">ALL BLUEPRINTS</button>
-          <button class="shop-tab-btn" data-cat="roads">🛣️ ROADS & PAVEMENT</button>
-          <button class="shop-tab-btn" data-cat="defense">DEFENSES & TRAPS</button>
-          <button class="shop-tab-btn" data-cat="economy">FACTORIES & RESOURCES</button>
-          <button class="shop-tab-btn" data-cat="civil">CIVIL & NATURE</button>
+        <!-- Shop Live Resource Display -->
+        <div class="resource-tickers shop-res-display">
+          <div class="res-item">
+            <span class="res-icon">💰</span>
+            <span id="shop-res-cash" class="res-val">1,500</span>
+          </div>
+          <div class="res-item">
+            <span class="res-icon">⚙️</span>
+            <span id="shop-res-iron" class="res-val">800</span>
+          </div>
+          <div class="res-item">
+            <span class="res-icon">🪵</span>
+            <span id="shop-res-wood" class="res-val">1,000</span>
+          </div>
         </div>
 
-        <div id="blueprint-items-container" class="blueprint-items-grid">
-          <!-- Rendered dynamically by UIManager -->
-        </div>
-
-        <div class="shop-footer">
+        <div class="shop-topbar-actions">
           <button id="btn-close-shop" class="btn-secondary">← BACK TO CITY</button>
           <button id="btn-shop-to-design" class="btn-primary">PROCEED TO DESIGN MAP 🗺️</button>
         </div>
+      </header>
+
+      <div class="shop-body">
+        <nav class="shop-sidebar">
+          <div class="shop-sidebar-title">CATEGORIES</div>
+          <button class="shop-tab-btn active" data-cat="all">📋 All Blueprints</button>
+          <button class="shop-tab-btn" data-cat="roads">🛣️ Roads &amp; Pavement</button>
+          <button class="shop-tab-btn" data-cat="defense">🛡️ Defenses &amp; Traps</button>
+          <button class="shop-tab-btn" data-cat="economy">🏭 Factories &amp; Resources</button>
+          <button class="shop-tab-btn" data-cat="civil">🏛️ Civil &amp; Nature</button>
+
+          <div class="shop-sidebar-note">
+            <div class="shop-th-badge">🏛️ Town Hall <strong id="shop-th-level">1</strong></div>
+            Locked blueprints unlock as you upgrade your Town Hall. Each card tells you what the structure does for you.
+          </div>
+        </nav>
+
+        <main class="shop-main">
+          <div id="blueprint-items-container" class="blueprint-items-grid">
+            <!-- Rendered dynamically by UIManager -->
+          </div>
+        </main>
       </div>
     </div>
 
@@ -224,6 +236,30 @@
 
     <!-- ================= 5. COMBAT HUD (TPP DRIVING & WEAPONS) ================= -->
     <div id="combat-hud" class="hidden">
+      <!-- Health readout for whatever structure you are currently hitting -->
+      <div id="target-building-hud" class="target-building-hud hidden">
+        <div class="target-row">
+          <span id="target-building-icon" class="target-icon">🏠</span>
+          <span id="target-building-name" class="target-name">BUILDING</span>
+          <span id="target-building-hp" class="target-hp">0 / 0</span>
+        </div>
+        <div class="target-bar">
+          <div id="target-building-fill" class="target-bar-fill"></div>
+        </div>
+      </div>
+
+      <!-- Red pulse at the screen edges whenever the buggy takes a hit -->
+      <div id="damage-vignette" class="damage-vignette"></div>
+
+      <!-- Armor bar floating above the buggy in the world -->
+      <div id="vehicle-health-hud" class="vehicle-health-hud hidden">
+        <div class="vehicle-health-bar"><div id="vehicle-health-fill" class="vehicle-health-fill"></div></div>
+        <div id="vehicle-health-text" class="vehicle-health-text">500 / 500</div>
+      </div>
+
+      <!-- Exit the raid early (keeps loot collected so far) -->
+      <button id="btn-retreat" class="btn-retreat" title="End the attack now and keep your loot">🏳️ EXIT RAID</button>
+
       <!-- Top Destruction Progress Tracker -->
       <div class="combat-top-tracker">
         <div class="tracker-row">
@@ -243,6 +279,7 @@
           <span>⚙️ Iron: <strong id="loot-iron">0</strong></span>
           <span>🪵 Wood: <strong id="loot-wood">0</strong></span>
           <span>🚨 Cops Wrecked: <strong id="cops-wrecked">0</strong></span>
+          <span>🚗 Lives: <strong id="hud-lives">1</strong></span>
         </div>
       </div>
 
@@ -282,34 +319,14 @@
         <div class="radar-label">POLICE & THREAT SCANNER</div>
       </div>
 
-      <!-- Primary Weapon Fire Button (HUD) -->
-      <div class="vehicle-fire-dock">
-        <button id="btn-fire-cannon" class="btn-fire-pulse" title="Fire Mounted Cannon (F / Click / Space)">
-          <span style="font-size: 20px;">🎯</span>
-          <span>ATTACK / FIRE CANNON</span>
-        </button>
-      </div>
-
-      <!-- Bottom Right Touch Driving Pedals / Steer Controls -->
-      <div class="touch-driving-controls">
-        <div class="touch-steer-group">
-          <button id="touch-left" class="touch-btn">◀</button>
-          <button id="touch-right" class="touch-btn">▶</button>
-        </div>
-        <div class="touch-pedals-group">
-          <button id="touch-brake" class="touch-btn pedal-brake" title="Reverse / Brake">REV</button>
-          <button id="touch-drift" class="touch-btn pedal-drift" title="Drift / Handbrake">DRIFT</button>
-          <button id="touch-jump" class="touch-btn pedal-jump" title="Big Jump Over Obstacles (Space / 4)">🦘 JUMP</button>
-          <button id="touch-fire" class="touch-btn pedal-fire" title="Fire Plasma Cannons (F / Click)">🔥 FIRE</button>
-          <button id="touch-gas" class="touch-btn pedal-gas" title="Accelerate">GAS</button>
-        </div>
-      </div>
+      <!-- The mounted cannon now fires automatically while driving, and the ability deck below
+           replaces the old REV / DRIFT / JUMP / FIRE / GAS pedal cluster. -->
     </div>
 
     <!-- ================= 6. TACTICAL SATELLITE RECON BANNER ================= -->
     <div id="tactical-recon-banner" class="tactical-banner hidden">
       <div class="banner-title">🛰️ TACTICAL SATELLITE SCAN ACTIVE</div>
-      <div class="banner-sub">TAP DIRECTLY ON ANY MAIN GATE ON THE 3D MAP TO LAUNCH THE ASSAULT</div>
+      <div class="banner-sub">TAP A MAIN GATE TO LAUNCH THE ASSAULT &nbsp;·&nbsp; DRAG TO PAN &nbsp;·&nbsp; SCROLL / PINCH TO ZOOM</div>
       <button id="btn-abort-recon" class="btn-secondary" style="margin-top: 10px; padding: 6px 16px; font-size: 12px;">ABORT RECON</button>
     </div>
 

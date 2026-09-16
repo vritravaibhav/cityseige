@@ -25,23 +25,37 @@ export class DestructionEngine {
     this.destroyedBuildingsCount = 0;
     this.lootedResources = { cash: 0, iron: 0, wood: 0 };
     this.onDestructionUpdate = null;
+    this.onBuildingDamaged = null;
   }
 
   reset(buildings) {
     this.clearEffects();
-    this.totalBuildingsCount = buildings.filter(b => !b.isMainGate).length;
+    // Gates are the way in and trees are scenery - neither counts toward 100% destruction.
+    this.totalBuildingsCount = buildings.filter(b => !b.isMainGate && b.type !== 'tree').length;
     this.destroyedBuildingsCount = 0;
     this.lootedResources = { cash: 0, iron: 0, wood: 0 };
 
+    this.clearRubble(buildings);
     buildings.forEach(b => {
       b.isDestroyed = false;
       b.hp = b.maxHp;
+      b.lastRamAt = 0;
       if (b.mesh) b.mesh.visible = true;
     });
 
     if (this.onDestructionUpdate) {
       this.onDestructionUpdate(this.getStats());
     }
+  }
+
+  /** Remove every rubble pile (raid over, or a fresh raid starting). */
+  clearRubble(buildings) {
+    (buildings || []).forEach(b => {
+      if (b.rubbleMesh) {
+        if (b.rubbleMesh.parent) b.rubbleMesh.parent.remove(b.rubbleMesh);
+        b.rubbleMesh = null;
+      }
+    });
   }
 
   getStats() {
@@ -128,6 +142,12 @@ export class DestructionEngine {
     if (building.isDestroyed) return;
 
     building.hp -= damage;
+
+    // Surface the target's remaining health to the HUD (clamped - hp goes negative on a kill).
+    if (this.onBuildingDamaged) {
+      this.onBuildingDamaged(building, Math.max(0, building.hp));
+    }
+
     if (building.hp <= 0) {
       this.destroyBuilding(building, buildingsList, policeManager);
     } else {
@@ -140,9 +160,21 @@ export class DestructionEngine {
     if (building.isDestroyed) return;
     building.isDestroyed = true;
     building.hp = 0;
-    if (building.mesh) building.mesh.visible = false;
+    if (building.mesh) {
+      building.mesh.visible = false;
+      // Leave remains behind: a small rubble pile that still blocks the buggy (see
+      // checkVehicleCollisions) without hiding the map. Removed by clearRubble().
+      if (!building.isMainGate && this.assetFactory && this.assetFactory.createRubble && !building.rubbleMesh) {
+        const fp = (building.footprint || (building.type === 'roadblock' || building.type === 'spike_trap' || building.type === 'tree' ? 1 : 2));
+        const rubble = this.assetFactory.createRubble(fp);
+        rubble.position.copy(building.mesh.position);
+        rubble.rotation.y = building.mesh.rotation.y;
+        (building.mesh.parent || this.scene).add(rubble);
+        building.rubbleMesh = rubble;
+      }
+    }
 
-    if (!building.isMainGate) {
+    if (!building.isMainGate && building.type !== 'tree') {
       this.destroyedBuildingsCount++;
     }
 
@@ -202,7 +234,28 @@ export class DestructionEngine {
 
     for (let i = 0; i < buildings.length; i++) {
       const b = buildings[i];
-      if (b.isDestroyed || !b.mesh) continue;
+      if (!b.mesh) continue;
+
+      // Rubble from a razed structure: a small, low barrier. Slows and nudges, never pins.
+      if (b.isDestroyed) {
+        if (!b.rubbleMesh || player.isAirborne) continue;
+        const rp = b.rubbleMesh.position;
+        const rdx = carPos.x - rp.x;
+        const rdz = carPos.z - rp.z;
+        const rd = Math.hypot(rdx, rdz);
+        const RUBBLE_RADIUS = 1.5;
+        if (rd < RUBBLE_RADIUS) {
+          const nx = rd > 0.001 ? rdx / rd : 0;
+          const nz = rd > 0.001 ? rdz / rd : 1;
+          player.position.x += nx * (RUBBLE_RADIUS - rd);
+          player.position.z += nz * (RUBBLE_RADIUS - rd);
+          if (speed > 6.0) {
+            player.speed *= 0.7;
+            player.camShake = Math.min(1.0, player.camShake + 0.12);
+          }
+        }
+        continue;
+      }
 
       const bPos = b.mesh.position;
 
@@ -250,17 +303,26 @@ export class DestructionEngine {
       // at 2 MPH indefinitely, with speed *= 0.45 reapplied every frame and no way past it.
       const isRammable = (b.type === 'roadblock' || b.type === 'spike_trap');
       if (isRammable && dist < hitRadius && !player.isAirborne) {
+        // A barricade is a WALL: push the buggy back out along the contact normal every frame,
+        // exactly like a building. (An earlier version only bled speed and never moved the car,
+        // so it drove straight through - "barrier not working".)
+        const nx = dist > 0.001 ? (dx / dist) : 0;
+        const nz = dist > 0.001 ? (dz / dist) : 1;
+        player.position.x += nx * (hitRadius - dist);
+        player.position.z += nz * (hitRadius - dist);
+
         if (speed > 5.0) {
-          // Ram damage scales with impact speed - a fast charge bursts straight through.
-          this.damageBuilding(b, Math.round(speed * 7), buildings, policeManager);
-          player.speed *= 0.88;
-          player.camShake = Math.min(1.0, player.camShake + 0.2);
-        } else {
-          // Crawling into it: nudge clear so you can never get permanently wedged.
-          const nx = dist > 0.001 ? (dx / dist) : 0;
-          const nz = dist > 0.001 ? (dz / dist) : 1;
-          player.position.x += nx * (hitRadius - dist);
-          player.position.z += nz * (hitRadius - dist);
+          // Each impact chips the barrier (scaled by speed) once per contact window, then bounces
+          // the car off so it has to charge again. Breaking through takes repeated ramming,
+          // sustained cannon fire, or a jump over it.
+          const now = performance.now();
+          if (!b.lastRamAt || now - b.lastRamAt > 450) {
+            b.lastRamAt = now;
+            this.damageBuilding(b, Math.round(speed * 4), buildings, policeManager);
+            this.sound.playCrash(Math.min(0.7, speed / 28.0));
+            player.camShake = Math.min(1.0, player.camShake + 0.3);
+          }
+          player.speed *= 0.35;
         }
         continue;
       }

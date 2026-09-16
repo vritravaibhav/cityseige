@@ -148,6 +148,7 @@ export class VehicleController {
     this.isInvisible = false;
     this.isNitro = false;
     this.isInvulnerable = false;
+    this.isBusted = false;
     this.position.set(x, 0, z);
     this.heading = heading;
     this.speed = 0;
@@ -168,12 +169,23 @@ export class VehicleController {
     this.camera.position.copy(this.camCurrentPos);
   }
 
+  /** Police contact = busted. Ends the life immediately regardless of armor. */
+  bust() {
+    if (this.isCrashed || this.isInvulnerable || this.isInvisible || this.damageImmunityTimer > 0 || this.isAirborne) return;
+    this.isBusted = true;
+    this.isCrashed = true;
+    this.speed = 0;
+    this.camShake = Math.min(2.5, this.camShake + 1.5);
+    this.sound.playCrash(1.4);
+  }
+
   takeDamage(amount) {
     if (this.isInvulnerable || this.isCrashed || this.damageImmunityTimer > 0 || this.isAirborne) return;
 
     this.damageImmunityTimer = 0.35; // 350ms immunity buffer so multiple contacts in one frame don't melt player
     this.sound.playCrash(1.2);
     this.camShake = Math.min(2.5, this.camShake + 0.8);
+    if (this.onDamaged) this.onDamaged(amount);   // HUD hit flash / vignette
 
     if (this.shield > 0) {
       this.shield -= amount;
@@ -360,8 +372,10 @@ export class VehicleController {
     this.updateCamera(delta);
 
     // 8. Mounted Autocannon Attack / Firing
+    // The autocannon is AUTOMATIC - it keeps firing on its own for as long as the buggy is
+    // alive and in the field, so the player only has to drive and play ability cards.
     this.fireCooldown -= delta;
-    if (this.inputs.fire && this.fireCooldown <= 0 && !this.isCrashed && this.mesh.visible) {
+    if (this.fireCooldown <= 0 && !this.isCrashed && this.mesh.visible) {
       this.fireCannons();
       this.fireCooldown = this.fireInterval;
     }
@@ -427,7 +441,9 @@ export class VehicleController {
           if (b.isDestroyed || !b.mesh) continue;
           const hitRadius = b.isMainGate ? 4.8 : 3.2;
           if (p.pos.distanceTo(b.mesh.position) < hitRadius) {
-            destructionEngine.damageBuilding(b, 65, buildings, policeManager);
+            // Per-shell damage. The autocannon fires ~7 shells/sec, so 65 here razed anything in a
+            // couple of seconds; 14 keeps sustained fire meaningful without instant demolition.
+            destructionEngine.damageBuilding(b, 14, buildings, policeManager);
             hit = true;
             break;
           }
@@ -439,7 +455,8 @@ export class VehicleController {
         for (let cop of policeManager.policeUnits) {
           if (cop.isDestroyed) continue;
           if (p.pos.distanceTo(cop.position) < 2.4) {
-            cop.hp -= 90;
+            // 24/shell at ~7 shells/s: a cruiser dies to ~2s of sustained fire, not instantly.
+            cop.hp -= 24;
             if (cop.hp <= 0) {
               policeManager.destroyUnit(cop);
             }

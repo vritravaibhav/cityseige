@@ -17,6 +17,8 @@ export class BuildingManager {
     this.scene.add(this.buildingGroup);
 
     this.activeBuildTasks = [];
+    // Harvest bubbles / construction hammers are builder-screen UI; hidden for the whole attack.
+    this.collectiblesHidden = false;
     this.onBuildersChanged = null;
     this.onConstructionFinished = null;
 
@@ -27,7 +29,9 @@ export class BuildingManager {
         cost: { cash: 500, iron: 250, wood: 400 },
         maxHp: 1200,
         footprint: 2,
-        desc: 'Heart of the city. Upgrade to unlock new structural tiers.'
+        desc: 'Heart of the city. Upgrade to unlock new structural tiers.',
+        unlockTownHall: 1,
+        helps: 'Raises your city tier, unlocking new buildings, higher upgrade caps and more builders.'
       },
       vehicle_lab: {
         name: 'Vehicle Tuning Lab',
@@ -35,7 +39,9 @@ export class BuildingManager {
         cost: { cash: 450, iron: 250, wood: 300 },
         maxHp: 750,
         footprint: 2,
-        desc: 'High-octane lab to upgrade vehicle top speed, acceleration, nitro, and jump height.'
+        desc: 'High-octane lab to upgrade vehicle top speed, acceleration, nitro, and jump height.',
+        unlockTownHall: 2,
+        helps: 'Tunes your battle buggy: top speed, acceleration, nitro, armor and jump height.'
       },
       weapons_lab: {
         name: 'Weapons & Munitions Lab',
@@ -43,7 +49,9 @@ export class BuildingManager {
         cost: { cash: 550, iron: 350, wood: 250 },
         maxHp: 850,
         footprint: 2,
-        desc: 'Explosive lab to upgrade bomb blast radius, explosion damage, rockets, and EMP duration.'
+        desc: 'Explosive lab to upgrade bomb blast radius, explosion damage, rockets, and EMP duration.',
+        unlockTownHall: 3,
+        helps: 'Upgrades your ordnance: bomb blast radius, explosive damage, rockets and EMP.'
       },
       sniper_tower: {
         name: 'Sniper Watchtower',
@@ -51,7 +59,9 @@ export class BuildingManager {
         cost: { cash: 350, iron: 200, wood: 250 },
         maxHp: 700,
         footprint: 2,
-        desc: 'Elevated marksman nest firing high-velocity rounds at intruder buggies.'
+        desc: 'Elevated marksman nest firing high-velocity rounds at intruder buggies.',
+        unlockTownHall: 2,
+        helps: 'Long-range marksman nest - out-ranges every other defense at 46m.'
       },
       tesla_coil: {
         name: 'Tesla Defense Coil',
@@ -59,7 +69,9 @@ export class BuildingManager {
         cost: { cash: 500, iron: 350, wood: 200 },
         maxHp: 850,
         footprint: 2,
-        desc: 'High-voltage electric arcs that zap nearby attacker vehicles.'
+        desc: 'High-voltage electric arcs that zap nearby attacker vehicles.',
+        unlockTownHall: 4,
+        helps: 'Fast-firing arc turret that shreds vehicles at close range (22m).'
       },
       laser_obelisk: {
         name: 'Laser Obelisk',
@@ -67,7 +79,9 @@ export class BuildingManager {
         cost: { cash: 750, iron: 500, wood: 300 },
         maxHp: 1350,
         footprint: 2,
-        desc: 'Continuous focused thermal heat laser cutting through vehicle armor.'
+        desc: 'Continuous focused thermal heat laser cutting through vehicle armor.',
+        unlockTownHall: 6,
+        helps: 'Continuous focused laser that cuts through armor at medium-long range (38m).'
       },
       main_gate: {
         name: 'Fortified Main Gate',
@@ -75,7 +89,9 @@ export class BuildingManager {
         cost: { cash: 350, iron: 300, wood: 200 },
         maxHp: 800,
         footprint: 3,
-        desc: 'Heavy perimeter defense gate with automated defense turrets.'
+        desc: 'Heavy perimeter defense gate with automated defense turrets.',
+        unlockTownHall: 1,
+        helps: 'Fortified entry with mounted turrets. Raiders must breach a gate to get in.'
       },
       police_station: {
         name: 'Police Station',
@@ -83,7 +99,9 @@ export class BuildingManager {
         cost: { cash: 400, iron: 200, wood: 250 },
         maxHp: 650,
         footprint: 2,
-        desc: 'Houses pursuit cruisers that deploy immediately when sirens sound.'
+        desc: 'Houses pursuit cruisers that deploy immediately when sirens sound.',
+        unlockTownHall: 1,
+        helps: 'Spawns pursuit cruisers that chase and ram raiders inside your city.'
       },
       petrol_pump: {
         name: 'Petrol Pump',
@@ -91,7 +109,9 @@ export class BuildingManager {
         cost: { cash: 300, iron: 150, wood: 100 },
         maxHp: 400,
         footprint: 2,
-        desc: 'High economic output! Warning: highly explosive during attacks.'
+        desc: 'High economic output! Warning: highly explosive during attacks.',
+        unlockTownHall: 1,
+        helps: 'Volatile fuel depot - detonates in a huge chain reaction that damages nearby attackers.'
       },
       lumber_mill: {
         name: 'Lumber Mill',
@@ -99,7 +119,9 @@ export class BuildingManager {
         cost: { cash: 150, iron: 50, wood: 100 },
         maxHp: 450,
         footprint: 2,
-        desc: 'Mines Wood continuously to supply construction.'
+        desc: 'Mines Wood continuously to supply construction.',
+        unlockTownHall: 1,
+        helps: 'Produces wood over time - the core material for building and upgrading.'
       },
       iron_foundry: {
         name: 'Iron Foundry',
@@ -107,7 +129,9 @@ export class BuildingManager {
         cost: { cash: 250, iron: 100, wood: 150 },
         maxHp: 550,
         footprint: 2,
-        desc: 'Mines Iron continuously to forge heavy fortifications.'
+        desc: 'Mines Iron continuously to forge heavy fortifications.',
+        unlockTownHall: 1,
+        helps: 'Produces iron over time, used for defenses and heavy upgrades.'
       },
       cash_mint: {
         name: 'Cash Mint',
@@ -115,23 +139,39 @@ export class BuildingManager {
         cost: { cash: 350, iron: 150, wood: 200 },
         maxHp: 500,
         footprint: 2,
-        desc: 'Produces Cash continuously for the treasury.'
+        desc: 'Produces Cash continuously for the treasury.',
+        unlockTownHall: 2,
+        helps: 'Generates cash passively, funding your purchases and upgrades.'
+      },
+      big_storage: {
+        name: 'Big Storage Depot',
+        category: 'civil',
+        cost: { cash: 600, iron: 400, wood: 500 },
+        maxHp: 900,
+        footprint: 2,
+        desc: 'Warehouse that holds structures you lift off the map.',
+        unlockTownHall: 3,
+        helps: 'Warehouse for structures you lift off the map, so you can redesign freely without losing them.'
       },
       spike_trap: {
         name: 'Spike Trap',
         category: 'defense',
         cost: { cash: 80, iron: 120, wood: 40 },
-        maxHp: 200,
+        maxHp: 900,
         footprint: 1,
-        desc: 'Hidden road trap that shreds attacker tires.'
+        desc: 'Hidden road trap that shreds attacker tires.',
+        unlockTownHall: 1,
+        helps: 'Hidden road trap that shreds attacker tires and blunts their charge.'
       },
       roadblock: {
         name: 'Roadblock Barrier',
         category: 'defense',
         cost: { cash: 50, iron: 80, wood: 30 },
-        maxHp: 300,
+        maxHp: 2000,
         footprint: 1,
-        desc: 'Concrete barrier to block enemy attack routes.'
+        desc: 'Concrete barrier to block enemy attack routes.',
+        unlockTownHall: 1,
+        helps: 'Concrete barrier that damages and slows any vehicle that rams it.'
       },
       builder_hut: {
         name: 'Hire a Labour',
@@ -139,7 +179,9 @@ export class BuildingManager {
         cost: { cash: 200, iron: 80, wood: 150 },
         maxHp: 350,
         footprint: 2,
-        desc: 'Hire a dedicated labourer to construct and upgrade buildings. Provides +1 active Labour slot.'
+        desc: 'Hire a dedicated labourer to construct and upgrade buildings. Provides +1 active Labour slot.',
+        unlockTownHall: 1,
+        helps: 'Adds a builder, so you can run another build or upgrade at the same time.'
       },
       tree: {
         name: 'Pine Tree',
@@ -147,7 +189,9 @@ export class BuildingManager {
         cost: { cash: 10, iron: 0, wood: 20 },
         maxHp: 100,
         footprint: 1,
-        desc: 'Countryside greenery.'
+        desc: 'Countryside greenery.',
+        unlockTownHall: 1,
+        helps: 'Decorative pine. Pure scenery - safe to clear whenever you want.'
       },
       road: {
         name: 'Paved Asphalt Road (x5 Tiles)',
@@ -155,7 +199,9 @@ export class BuildingManager {
         cost: { cash: 25, iron: 15, wood: 20 },
         packCount: 5,
         footprint: 1,
-        desc: 'Durable paved asphalt tiles to connect structures and gates in your city.'
+        desc: 'Durable paved asphalt tiles to connect structures and gates in your city.',
+        unlockTownHall: 1,
+        helps: 'Paved tiles that shape how raiders move through your city.'
       }
     };
   }
@@ -353,6 +399,7 @@ export class BuildingManager {
       case 'iron_foundry':  return f.createIronFoundry(lvl);
       case 'cash_mint':     return f.createCashMint(lvl);
       case 'builder_hut':   return f.createBuilderHut(lvl);
+      case 'big_storage':   return f.createBigStorage ? f.createBigStorage(lvl) : null;
       case 'spike_trap':    return f.createSpikeTrap(lvl);
       case 'roadblock':     return f.createRoadblock(lvl);
       case 'tree':          return f.createPineTree(lvl);
@@ -441,6 +488,15 @@ export class BuildingManager {
     return Math.max(0, this.totalBuilders - this.busyBuilders);
   }
 
+  /** Show or hide every floating collectible marker (resource bubbles, construction hammers). */
+  setCollectiblesVisible(visible) {
+    this.collectiblesHidden = !visible;
+    this.buildings.forEach(b => {
+      if (b.bubbleMesh) b.bubbleMesh.visible = visible;
+      if (b.constructionMesh) b.constructionMesh.visible = visible;
+    });
+  }
+
   getTownHallLevel() {
     const th = this.buildings.find(b => b.type === 'town_hall');
     return th ? (th.level || 1) : 1;
@@ -514,6 +570,7 @@ export class BuildingManager {
     if (this.assetFactory && this.assetFactory.createConstructionHammer) {
       const hammer = this.assetFactory.createConstructionHammer();
       hammer.position.set(building.gx * this.tileSize, 5.8, building.gz * this.tileSize);
+      hammer.visible = !this.collectiblesHidden;
       this.buildingGroup.add(hammer);
       building.constructionMesh = hammer;
     }
@@ -686,6 +743,7 @@ export class BuildingManager {
             const bubble = this.assetFactory.createResourceBubble(b.produceType);
             bubble.position.set(b.gx * this.tileSize, 5.0, b.gz * this.tileSize);
             bubble.userData.parentBuilding = b;
+            bubble.visible = !this.collectiblesHidden;   // stays hidden if a raid is in progress
             this.buildingGroup.add(bubble);
             b.bubbleMesh = bubble;
           }

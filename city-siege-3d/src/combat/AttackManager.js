@@ -57,9 +57,19 @@ export class AttackManager {
   }
 
   _bindReconPointer() {
+    // The tactical map can be dragged to pan, so a gate is chosen on RELEASE and only if the
+    // pointer barely moved - a drag that happens to start on a beacon must not launch the raid.
+    let downAt = null;
     window.addEventListener('pointerdown', (e) => {
       if (this.state !== 'RECON') return;
-      if (e.target.closest('#ui-container button')) return;
+      downAt = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointerup', (e) => {
+      if (this.state !== 'RECON' || !downAt) return;
+      const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+      downAt = null;
+      if (moved > 6) return;
+      if (e.target && e.target.closest && e.target.closest('#ui-container button')) return;
 
       this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -110,6 +120,12 @@ export class AttackManager {
     this.state = 'RECON';
     this.sound.ensureStarted();
     this.scene.setCameraMode('recon');
+    this.buildings.setCollectiblesVisible(false);   // no floating collect markers during the attack
+
+    // Fit all gates on screen with padding before the player is asked to pick one.
+    this.scene.frameReconOnTargets(
+      this.buildings.getMainGates().map(g => g.mesh && g.mesh.position).filter(Boolean)
+    );
 
     // Hide attack vehicle until breach
     this.vehicle.mesh.visible = false;
@@ -136,8 +152,10 @@ export class AttackManager {
   }
 
   abortRecon() {
+    this.buildings.setCollectiblesVisible(true);
     this.clearBeacons();
     this.state = 'IDLE';
+    this.ui.hideTargetBuildingHealth();
     this.scene.setCameraMode('builder');
     this.ui.hideTacticalReconBanner();
     this.ui.showBuilderHUD();
@@ -163,8 +181,12 @@ export class AttackManager {
     const spawnZ = gatePos.z + outwardDir.z * spawnDist;
     const heading = Math.atan2(-outwardDir.x, -outwardDir.z);
 
+    this.breachSpawn = { x: spawnX, z: spawnZ, heading };
     this.vehicle.spawnAt(spawnX, spawnZ, heading);
     this.vehicle.mesh.visible = true;
+    // Police converge on the breach gate almost immediately; give the player a moment to move
+    // before contact can bust them (bust() honours damageImmunityTimer).
+    this.vehicle.damageImmunityTimer = 3.0;
 
     // 2. Camera positions for smooth swoop
     const satPos = this.scene.reconCamera.position.clone();
@@ -188,10 +210,23 @@ export class AttackManager {
     this.ui.showCombatHUD();
 
     // 1. Reset destruction tracker & cards
+    this.destruction.onBuildingDamaged = (b, hp) => this.ui.showTargetBuildingHealth(b, hp);
     this.destruction.reset(this.buildings.buildings);
+
+    // Three lives per raid, plus any spares stocked at the Vehicle Tuning Lab.
+    this.baseLives = 3;
+    this.raidLives = this.baseLives + (this.economy.vehicleLives || 0);
+    this.respawnsUsed = 0;
+    this.crashHandling = false;
+    this.ui.updateLivesHUD(this.raidLives);
+
+    // Exit button: retreat with whatever has been looted so far.
+    this.ui.onRetreat = () => { if (this.state === 'COMBAT') this.endAttack('retreat'); };
+    this.vehicle.onDamaged = (amount) => this.ui.flashDamage(amount);
     this.cards.reset();
     this.cards.setPlayer(this.vehicle, this.buildings.buildings);
-    this.cards.spawnInWorldCards(this.buildings.roadNetwork, this.buildings.buildings);
+    // Ability cards are earned and upgraded in the card training screen and used from the deck
+    // while driving - no pickup cards scattered across the roads.
 
     // 2. Register Gate Turrets
     this.turrets.clear();
@@ -287,20 +322,82 @@ export class AttackManager {
       roadNetwork: this.buildings.roadNetwork
     });
 
-    // 9. Check End of Attack Condition (Vehicle Crashed!)
+    // Keep the target health bar pinned above the structure being hit
+    this.ui.updateTargetBuildingHealthPosition(this.scene.activeCamera);
+    // ...and the buggy's own armor bar pinned above the buggy.
+    this.ui.updateVehicleHealthBar(this.scene.activeCamera, this.vehicle);
+
+    // 9a. Every real structure razed -> the attack is complete.
+    if (destructionStats.percentage >= 100 && destructionStats.total > 0) {
+      this.endAttack('victory');
+      return;
+    }
+
+    // 9b. Buggy destroyed (police contact or armor gone): blow it up, hold on the wreck for a
+    // beat so the player sees it, then spend a life - or end the siege if none are left.
     if (this.vehicle.isCrashed) {
-      this.endAttack();
+      if (!this.crashHandling) {
+        this.crashHandling = true;
+        this.crashTimer = 1.1;
+        const vp = this.vehicle.position;
+        this.destruction.spawnExplosion(vp.x, 1.2, vp.z, 'huge');
+        this.sound.playExplosion('huge');
+        this.vehicle.mesh.visible = false;
+        this.ui.hideVehicleHealthBar();
+      }
+      this.crashTimer -= delta;
+      if (this.crashTimer <= 0) {
+        this.crashHandling = false;
+        this.raidLives -= 1;
+        if (this.raidLives > 0) {
+          this.respawnAfterBust();
+        } else {
+          this.endAttack(this.vehicle.isBusted ? 'busted' : 'crash');
+        }
+      }
     }
   }
 
-  endAttack() {
+  /**
+   * Spend a spare life and put the buggy back at the breach point. Destruction so far is KEPT,
+   * but the police force is re-spawned in full - being caught is not free.
+   */
+  respawnAfterBust() {
+    const wasBusted = this.vehicle.isBusted;   // spawnAt() below clears the flag
+    // The first two respawns come from the three base lives; beyond that we burn stocked spares.
+    this.respawnsUsed += 1;
+    if (this.respawnsUsed > this.baseLives - 1) this.economy.consumeVehicleLife();
+    const left = this.raidLives;
+
+    const sp = this.breachSpawn || { x: 0, z: 90, heading: Math.PI };
+    this.vehicle.spawnAt(sp.x, sp.z, sp.heading);
+    this.vehicle.mesh.visible = true;
+    this.vehicle.damageImmunityTimer = 2.5;   // breathing room so a cop cannot re-bust you on spawn
+
+    const wrecked = this.police.totalWrecked;
+    this.police.clear();
+    this.police.totalWrecked = wrecked;
+    this.police.spawnFromStations(this.buildings.getPoliceStations());
+
+    this.ui.hideTargetBuildingHealth();
+    this.ui.updateLivesHUD(left);
+    this.ui.showToast(`${wasBusted ? '🚨 BUSTED BY POLICE' : '💥 BUGGY WRECKED'}! ${left} ${left === 1 ? 'life' : 'lives'} left. Police re-deployed.`);
+  }
+
+  /** outcome: 'crash' (out of lives) | 'victory' (100% destruction) | 'retreat' (exit button) */
+  endAttack(outcome = 'crash') {
     this.state = 'RESULT';
     this.scene.setAlarmLighting(false);
+    this.ui.hideTargetBuildingHealth();
+    this.ui.onRetreat = null;
+    this.ui.hideVehicleHealthBar();
+    this.vehicle.onDamaged = null;
 
     const finalStats = this.destruction.getStats();
     this.attackStats = {
       ...finalStats,
-      policeWrecked: this.police.totalWrecked
+      policeWrecked: this.police.totalWrecked,
+      outcome
     };
 
     // Reward looted resources into player treasury!
@@ -316,12 +413,14 @@ export class AttackManager {
 
   returnToBuilder() {
     this.state = 'IDLE';
+    this.buildings.setCollectiblesVisible(true);
     this.scene.setCameraMode('builder');
     this.scene.setAlarmLighting(false);
     this.police.clear();
     this.turrets.clear();
     this.cards.reset();
     this.destruction.clearEffects();
+    this.destruction.clearRubble(this.buildings.buildings);
 
     // Restore razed buildings for the builder phase. Clearing mesh.visible alone left
     // isDestroyed set until the NEXT attack called DestructionEngine.reset(), so factories

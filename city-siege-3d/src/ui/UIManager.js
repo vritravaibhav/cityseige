@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 /**
  * UIManager - Manages DOM UI screens:
  * 1. Home City View (Clean, panoramic city view, tap-to-collect resources)
@@ -51,7 +52,7 @@ export class UIManager {
     this.scanGateName = document.getElementById('scan-gate-name');
 
     // Modals
-    this.shopModal = document.getElementById('blueprint-shop-modal');
+    this.shopModal = document.getElementById('shop-view');
     this.redesignModal = document.getElementById('redesign-modal');
     this.inspectorModal = document.getElementById('inspector-modal');
     this.resultModal = document.getElementById('result-modal');
@@ -191,6 +192,121 @@ export class UIManager {
     return icons[type] || '🏗️';
   }
 
+  /**
+   * Show the health of the structure currently being hit. Auto-hides shortly after the last hit
+   * so it never lingers over the HUD while the player drives on.
+   */
+  showTargetBuildingHealth(building, hp) {
+    const box = document.getElementById('target-building-hud');
+    if (!box || !building) return;
+
+    const maxHp = building.maxHp || 1;
+    const pct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+
+    const nameEl = document.getElementById('target-building-name');
+    const hpEl = document.getElementById('target-building-hp');
+    const iconEl = document.getElementById('target-building-icon');
+    const fillEl = document.getElementById('target-building-fill');
+
+    if (nameEl) nameEl.textContent = building.name || building.type || 'STRUCTURE';
+    if (hpEl) hpEl.textContent = `${Math.ceil(hp)} / ${Math.round(maxHp)}`;
+    if (iconEl) iconEl.textContent = this._getTypeIcon(building.type);
+    if (fillEl) fillEl.style.width = `${pct}%`;
+
+    box.classList.remove('hidden', 'fading');
+    this._targetBuilding = building;
+
+    clearTimeout(this._targetHudFade);
+    clearTimeout(this._targetHudHide);
+    this._targetHudFade = setTimeout(() => box.classList.add('fading'), 1600);
+    this._targetHudHide = setTimeout(() => box.classList.add('hidden'), 1900);
+  }
+
+  hideTargetBuildingHealth() {
+    const box = document.getElementById('target-building-hud');
+    clearTimeout(this._targetHudFade);
+    clearTimeout(this._targetHudHide);
+    this._targetBuilding = null;
+    if (box) box.classList.add('hidden');
+  }
+
+  /**
+   * Pin the health bar in screen space directly ABOVE the structure being hit.
+   * Called every frame from the combat loop; cheap when nothing is targeted.
+   */
+  updateTargetBuildingHealthPosition(camera) {
+    const b = this._targetBuilding;
+    const box = document.getElementById('target-building-hud');
+    if (!b || !b.mesh || !camera || !box || box.classList.contains('hidden')) return;
+
+    if (!this._targetProj) this._targetProj = new THREE.Vector3();
+    const v = this._targetProj;
+    v.copy(b.mesh.position);
+    const fp = (this.buildings.catalog[b.type] || {}).footprint || b.footprint || 1;
+    v.y += (fp >= 2 ? 7.5 : 5.0);   // float above the roofline
+    v.project(camera);
+
+    if (v.z > 1) { box.style.opacity = '0'; return; }  // behind the camera
+    box.style.opacity = '';
+    box.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
+    box.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
+  }
+
+  /** Armor bar that floats just above the buggy in the 3D view, colour-coded by remaining armor. */
+  updateVehicleHealthBar(camera, vehicle) {
+    const box = document.getElementById('vehicle-health-hud');
+    if (!box || !camera || !vehicle || !vehicle.mesh || !vehicle.mesh.visible || vehicle.isCrashed) {
+      if (box) box.classList.add('hidden');
+      return;
+    }
+    if (!this._vehProj) this._vehProj = new THREE.Vector3();
+    const v = this._vehProj;
+    v.copy(vehicle.position);
+    v.y += 3.2;
+    v.project(camera);
+    if (v.z > 1) { box.classList.add('hidden'); return; }
+
+    box.classList.remove('hidden');
+    box.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
+    box.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
+
+    const ratio = Math.max(0, Math.min(1, vehicle.hp / (vehicle.maxHp || 1)));
+    const fill = document.getElementById('vehicle-health-fill');
+    const txt = document.getElementById('vehicle-health-text');
+    if (fill) {
+      fill.style.width = `${ratio * 100}%`;
+      fill.style.background = ratio > 0.5 ? '#43d17a' : ratio > 0.25 ? '#ffc107' : '#ff3d3d';
+    }
+    if (txt) txt.textContent = `${Math.ceil(vehicle.hp)} / ${Math.round(vehicle.maxHp)}`;
+  }
+
+  hideVehicleHealthBar() {
+    const box = document.getElementById('vehicle-health-hud');
+    if (box) box.classList.add('hidden');
+  }
+
+  /** Hit feedback: the armor bars flash and a red vignette pulses at the screen edges. */
+  flashDamage(amount) {
+    const targets = [document.getElementById('vehicle-health-hud'), this.barHp && this.barHp.parentElement];
+    targets.forEach(el => {
+      if (!el) return;
+      el.classList.remove('hit');
+      void el.offsetWidth;          // restart the animation
+      el.classList.add('hit');
+    });
+    const vig = document.getElementById('damage-vignette');
+    if (vig) {
+      vig.style.opacity = amount >= 60 ? '0.85' : '0.55';
+      clearTimeout(this._vigT);
+      this._vigT = setTimeout(() => { vig.style.opacity = '0'; }, 220);
+    }
+  }
+
+  updateLivesHUD(livesLeft) {
+    const el = document.getElementById('hud-lives');
+    if (el) el.textContent = `${livesLeft || 0}`;
+  }
+
   bindTouchControls(vehicleController) {
     const bindBtn = (id, inputProp) => {
       const el = document.getElementById(id);
@@ -255,8 +371,10 @@ export class UIManager {
       this.renderDesignInventory();
       if (this.updateRoadBadge) this.updateRoadBadge();
     } else if (screen === 'SHOP') {
-      if (this.homeView) this.homeView.classList.remove('hidden'); // keep city background visible
+      // The shop is its own full screen now: the city stays hidden behind it and the map grid is
+      // locked so clicks on the shop cannot harvest or inspect buildings underneath.
       if (this.shopModal) this.shopModal.classList.remove('hidden');
+      this.grid.setMode('locked');
       this.renderShopCatalog();
     } else if (screen === 'RECON') {
       if (this.reconBanner) this.reconBanner.classList.remove('hidden');
@@ -271,6 +389,15 @@ export class UIManager {
   }
 
   _initHomeNavigation() {
+    // Exit the raid early. AttackManager sets onRetreat for the duration of combat.
+    const btnRetreat = document.getElementById('btn-retreat');
+    if (btnRetreat) {
+      btnRetreat.addEventListener('click', () => {
+        if (this.sound) this.sound.playClick();
+        if (this.onRetreat) this.onRetreat();
+      });
+    }
+
     // index.html declares #btn-abort-recon but nothing ever bound it, so recon was a one-way
     // door: the only way out was to commit to an attack or reload the page.
     const btnAbort = document.getElementById('btn-abort-recon');
@@ -536,7 +663,9 @@ export class UIManager {
     const catalog = this.buildings.catalog;
     const res = this.economy.getResources();
 
-    // Update shop top resource balances
+    // Update shop top resource balances + the Town Hall tier that drives unlocks
+    const shopTh = document.getElementById('shop-th-level');
+    if (shopTh) shopTh.textContent = `${this.buildings.getTownHallLevel()}`;
     if (this.shopResCash) this.shopResCash.textContent = res.cash.toLocaleString();
     if (this.shopResIron) this.shopResIron.textContent = res.iron.toLocaleString();
     if (this.shopResWood) this.shopResWood.textContent = res.wood.toLocaleString();
@@ -547,18 +676,25 @@ export class UIManager {
         return;
       }
 
+      // Town Hall gating: only blueprints your city tier has actually unlocked can be bought.
+      const thLevel = this.buildings.getTownHallLevel();
+      const reqTH = def.unlockTownHall || 1;
+      const isLocked = thLevel < reqTH;
+
       const hasCash = res.cash >= (def.cost.cash || 0);
       const hasIron = res.iron >= (def.cost.iron || 0);
       const hasWood = res.wood >= (def.cost.wood || 0);
-      const canAfford = hasCash && hasIron && hasWood;
+      const canAfford = hasCash && hasIron && hasWood && !isLocked;
       const ownedCount = this.economy.getInventoryCount(type);
       const packCount = def.packCount || 1;
-      const buyBtnText = canAfford
-        ? (def.packCount ? `BUY (+${packCount} TO INVENTORY) 📦` : 'BUY (+1 TO INVENTORY) 📦')
-        : 'NEED MORE RESOURCES ⚠️';
+      const buyBtnText = isLocked
+        ? `🔒 REQUIRES TOWN HALL ${reqTH}`
+        : canAfford
+          ? (def.packCount ? `BUY (+${packCount} TO INVENTORY) 📦` : 'BUY (+1 TO INVENTORY) 📦')
+          : 'NEED MORE RESOURCES ⚠️';
 
       const card = document.createElement('div');
-      card.className = 'blueprint-card';
+      card.className = isLocked ? 'blueprint-card is-locked' : 'blueprint-card';
       card.innerHTML = `
         <div class="blueprint-header">
           <div class="blueprint-icon">${this._getTypeIcon(type)}</div>
@@ -569,6 +705,8 @@ export class UIManager {
           </div>
         </div>
         <p style="font-size:11px; color:var(--text-dim); margin-bottom:6px; min-height: 28px;">${def.desc}</p>
+        ${def.helps ? `<div class="blueprint-helps"><span class="helps-label">WHAT IT DOES FOR YOU</span><span>${def.helps}</span></div>` : ''}
+        ${isLocked ? `<div class="blueprint-lock">🔒 Unlocks at Town Hall ${reqTH} — you are Town Hall ${thLevel}</div>` : ''}
         <div class="blueprint-reqs">
           <div class="req-item">
             <span>💰 Cash:</span>
@@ -657,7 +795,7 @@ export class UIManager {
   showBuildingInspector(building) {
     // The city grid listens on window, so a stray combat click used to pop this panel over
     // the HUD mid-raid. Allow-list the builder screens so future screens stay covered too.
-    if (this.currentScreen !== 'HOME' && this.currentScreen !== 'DESIGN' && this.currentScreen !== 'SHOP') return;
+    if (this.currentScreen !== 'HOME' && this.currentScreen !== 'DESIGN') return;
 
     if (!this.inspectorModal) return;
     if (!building) {
@@ -681,11 +819,41 @@ export class UIManager {
     const cost = this.buildings.getUpgradeCost(building);
     const buildTime = this.buildings.getBuildTime(building.type, nextLvl);
     const isDesignMode = this.currentScreen === 'DESIGN';
-    const canStow = isDesignMode && !isMainGate && !isTownHall;
+    // Structures are no longer destroyed - they are put away in the Big Storage Depot and can be
+    // placed again later. Only pure decoration can actually be removed from the map.
+    const isDecorative = (building.type === 'tree');
+    const hasStorage = this.buildings.buildings.some(b => b.type === 'big_storage' && !b.isDestroyed);
+    const canStow = !isMainGate && !isTownHall && !isDecorative && hasStorage;
+    const needsStorage = !isMainGate && !isTownHall && !isDecorative && !hasStorage;
     const isUnderConstruction = building.isUnderConstruction;
     const freeBuilders = this.buildings.freeBuilders;
 
     let actionButtonsHtml = '';
+
+    // Vehicle Tuning Lab sells spare lives for the battle buggy (max 2 spares = 3 lives).
+    // Kept in its own variable: the upgrade branches below ASSIGN actionButtonsHtml and would
+    // otherwise wipe this panel out.
+    let labLivesHtml = '';
+    if (building.type === 'vehicle_lab' && !isUnderConstruction) {
+      const spare = this.economy.vehicleLives || 0;
+      const max = 2;
+      const cost = { cash: 400, iron: 250, wood: 150 };
+      const res = this.economy.getResources();
+      const canAfford = res.cash >= cost.cash && res.iron >= cost.iron && res.wood >= cost.wood;
+      const atMax = spare >= max;
+      labLivesHtml = `
+        <div class="lab-lives-panel">
+          <div class="lab-lives-row">
+            <span>🚗 Buggy lives per raid</span>
+            <strong>3 base + ${spare} spare</strong>
+          </div>
+          <div class="lab-lives-note">Every raid starts with 3 lives. Spares (max ${max}) are used once those are gone.</div>
+          <button id="btn-buy-life" class="btn-primary" ${(atMax || !canAfford) ? 'disabled style="opacity:0.45; cursor:not-allowed;"' : ''}>
+            ${atMax ? '✅ MAX LIVES STOCKED' : `BUY SPARE LIFE — 💰${cost.cash} ⚙️${cost.iron} 🪵${cost.wood}`}
+          </button>
+        </div>
+      `;
+    }
 
     if (isUnderConstruction) {
       const task = building.buildTask || { remaining: 10, total: 10, targetLevel: nextLvl };
@@ -753,6 +921,7 @@ export class UIManager {
         ${building.produceType ? `<span>Stored: <strong>${Math.floor(building.stored || 0)} / ${building.maxCapacity}</strong></span>` : ''}
       </div>
       <div class="inspector-actions">
+        ${labLivesHtml}
         ${actionButtonsHtml}
         ${isDesignMode ? `
           <button id="btn-relocate-building" class="btn-primary" style="background: linear-gradient(135deg, #00e5ff, #0091ea); color: #06101c;">
@@ -761,13 +930,33 @@ export class UIManager {
         ` : ''}
         ${canStow ? `
           <button id="btn-stow-building" class="btn-secondary">
-            📦 Stow into Inventory
+            📦 Move to Big Storage
           </button>
         ` : ''}
-        <button id="btn-demolish-building" class="btn-danger">Demolish</button>
+        ${needsStorage ? `
+          <div class="needs-storage-note">
+            📦 Build a <strong>Big Storage Depot</strong> (Town Hall 3) to put this structure away.
+            Buildings are never demolished - they are stored so you can place them again.
+          </div>
+        ` : ''}
+        ${isDecorative ? `<button id="btn-demolish-building" class="btn-danger">🌲 Clear Decoration</button>` : ''}
         <button id="btn-close-inspector" class="btn-secondary">Close</button>
       </div>
     `;
+
+    const btnBuyLife = document.getElementById('btn-buy-life');
+    if (btnBuyLife) {
+      btnBuyLife.addEventListener('click', () => {
+        const r = this.economy.buyVehicleLife();
+        if (r.ok) {
+          this.sound.playUpgrade();
+          this.showToast(`🚗 Spare life stocked (${1 + r.lives} lives total)`);
+          this.showBuildingInspector(building);
+        } else {
+          this.sound.playCrash(0.3);
+        }
+      });
+    }
 
     const btnFinish = document.getElementById('btn-finish-instant');
     if (btnFinish) {
@@ -1142,7 +1331,11 @@ export class UIManager {
     if (!content) return;
 
     content.innerHTML = `
-      <div class="result-badge">💥 VEHICLE CRASHED - SIEGE COMPLETE! 💥</div>
+      <div class="result-badge ${stats.outcome === 'victory' ? 'result-victory' : ''}">${
+        stats.outcome === 'victory' ? '🏆 100% DESTRUCTION - ATTACK COMPLETED! 🏆'
+        : stats.outcome === 'retreat' ? '🏳️ RETREATED - LOOT SECURED'
+        : stats.outcome === 'busted' ? '🚨 BUSTED BY POLICE - OUT OF LIVES 🚨'
+        : '💥 BUGGY DESTROYED - OUT OF LIVES 💥'}</div>
       <div class="result-stars">
         <span class="${stats.stars >= 1 ? 'star-gold' : 'star-dim'}">⭐</span>
         <span class="${stats.stars >= 2 ? 'star-gold' : 'star-dim'}">⭐</span>

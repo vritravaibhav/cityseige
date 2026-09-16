@@ -20,9 +20,16 @@ export class PoliceManager {
     this.totalWrecked = 0;
     this.spawnTimer = 0;
     this.maxPolice = 4;
+
+    // Reinforcements: a wrecked cruiser is replaced after a delay from any police station that
+    // is still standing. Raze the stations and the pursuit dries up.
+    this.stations = [];
+    this.respawnQueue = [];
+    this.respawnDelay = 4.0;
   }
 
   spawnFromStations(policeStations) {
+    this.stations = policeStations || [];
     if (!policeStations || policeStations.length === 0) return;
 
     policeStations.forEach(station => {
@@ -47,8 +54,8 @@ export class PoliceManager {
       maxSpeed: 16.5 + Math.random() * 2.5, // Slower pursuit speed (~17 m/s vs player's 30 m/s)
       acceleration: 8.5, // Gradual acceleration so player can outrun them
       turnSpeed: 1.5, // Wider turning arc so player can dodge with sharp corners
-      hp: 120,
-      maxHp: 120,
+      hp: 320,
+      maxHp: 320,
       ramCooldown: 0, // Prevents multi-frame damage melting
       roadblockCooldown: 4.0 + Math.random() * 6.0,
       isDestroyed: false
@@ -66,8 +73,9 @@ export class PoliceManager {
     const roadblock = {
       mesh,
       position: new THREE.Vector3(x, 0, z),
-      radius: 2.0,
-      hp: 180,
+      radius: 2.6,
+      hp: 600,
+      lastRamAt: 0,
       isDestroyed: false
     };
 
@@ -77,6 +85,7 @@ export class PoliceManager {
 
   update(delta, elapsed, player) {
     if (!player) return;
+    this._updateRespawns(delta);
 
     let closestDist = Infinity;
 
@@ -101,6 +110,10 @@ export class PoliceManager {
         // Lost sight: wander or slow down
         unit.speed = Math.max(5.0, unit.speed - unit.acceleration * delta);
         unit.heading += Math.sin(elapsed * 2 + i) * delta * 0.8;
+      } else if (unit.breakoutTimer > 0) {
+        // Un-sticking manoeuvre: hold the new heading and floor it for a moment.
+        unit.breakoutTimer -= delta;
+        unit.speed = Math.min(unit.maxSpeed, unit.speed + unit.acceleration * 2 * delta);
       } else {
         // Compute separation force from other police cruisers to maintain distance
         let sepX = 0;
@@ -156,11 +169,11 @@ export class PoliceManager {
           unit.speed *= 0.35; // Police car decelerates from bump impact
 
           if (unit.ramCooldown <= 0) {
-            // Apply single hit damage with generous cooldown (18-24 damage, NOT instant death!)
-            const ramDamage = Math.round(18 + Math.random() * 6);
-            player.takeDamage(ramDamage);
-            unit.hp -= 35;
-            unit.ramCooldown = 1.8; // Police cannot hit again for 1.8 seconds!
+            // A cruiser making contact is a BUST: the buggy is destroyed on the spot and the
+            // player moves to their next life. bust() honours spawn immunity and invisibility.
+            player.bust();
+            unit.hp -= 10;            // ramming is their job - it barely scratches them
+            unit.ramCooldown = 1.4;
             this.sound.playCrash(0.7);
 
             if (unit.hp <= 0) {
@@ -169,6 +182,22 @@ export class PoliceManager {
             }
           }
         }
+      }
+
+      // 4b. Stuck detector: a cruiser that has barely moved in 1.5s while not in contact with
+      // the player is wedged (barrier, wall, pile-up). Kick it out sideways at speed.
+      unit.stuckClock = (unit.stuckClock || 0) + delta;
+      if (unit.stuckClock >= 1.5) {
+        unit.stuckClock = 0;
+        if (unit.lastCheckPos) {
+          const moved = unit.position.distanceTo(unit.lastCheckPos);
+          if (moved < 2.0 && distToPlayer > 4.5 && !(unit.breakoutTimer > 0)) {
+            unit.heading += (Math.random() < 0.5 ? 1 : -1) * (Math.PI * 0.5 + Math.random() * 0.6);
+            unit.speed = Math.max(unit.speed, unit.maxSpeed * 0.8);
+            unit.breakoutTimer = 1.2;
+          }
+        }
+        unit.lastCheckPos = unit.position.clone();
       }
 
       // 5. Update Position
@@ -198,9 +227,28 @@ export class PoliceManager {
         if (uB.isDestroyed) continue;
 
         const copDist = uA.position.distanceTo(uB.position);
-        if (copDist < 2.8) {
-          collidedPairs.push([uA, uB]);
-        }
+        if (copDist >= 2.8) continue;
+
+        // Only a genuine FACE-TO-FACE smash wrecks them. Previously any contact at any speed
+        // and any angle destroyed both units, so cruisers deleted themselves by brushing while
+        // merging or stacking up in a queue behind the player.
+        const fwdA = { x: Math.sin(uA.heading), z: Math.cos(uA.heading) };
+        const fwdB = { x: Math.sin(uB.heading), z: Math.cos(uB.heading) };
+
+        // Nose-to-nose: the two cars point in opposing directions...
+        const facingDot = fwdA.x * fwdB.x + fwdA.z * fwdB.z;
+        if (facingDot > -0.6) continue;
+
+        // ...and A is actually driving INTO B rather than away from it.
+        const toB = { x: uB.position.x - uA.position.x, z: uB.position.z - uA.position.z };
+        const toBLen = Math.hypot(toB.x, toB.z) || 1;
+        const closingDot = (fwdA.x * toB.x + fwdA.z * toB.z) / toBLen;
+        if (closingDot < 0.5) continue;
+
+        // A glancing touch at parking speed should not vaporise two cruisers.
+        if (uA.speed + uB.speed < 10.0) continue;
+
+        collidedPairs.push([uA, uB]);
       }
     }
 
@@ -246,6 +294,27 @@ export class PoliceManager {
     if (idx !== -1) {
       this.policeUnits.splice(idx, 1);
     }
+
+    // Queue a replacement; whether it actually arrives depends on a station surviving.
+    this.respawnQueue.push({ t: this.respawnDelay });
+  }
+
+  /** Tick reinforcement timers; spawn from a random surviving station. */
+  _updateRespawns(delta) {
+    if (this.respawnQueue.length === 0) return;
+    const live = this.stations.filter(st => st && st.mesh && !st.isDestroyed);
+    for (let i = this.respawnQueue.length - 1; i >= 0; i--) {
+      const q = this.respawnQueue[i];
+      q.t -= delta;
+      if (q.t > 0) continue;
+      this.respawnQueue.splice(i, 1);
+      if (live.length === 0) continue;                 // no station left to send backup
+      if (this.policeUnits.length >= this.maxPolice) continue;
+      const st = live[Math.floor(Math.random() * live.length)];
+      const pos = st.mesh.position;
+      this.spawnCruiser(pos.x + (Math.random() - 0.5) * 4, pos.z + (Math.random() - 0.5) * 4);
+      this.sound.playPlace();
+    }
   }
 
   damageAt(x, z, radius, damage) {
@@ -290,13 +359,30 @@ export class PoliceManager {
       const rb = this.roadblocks[i];
       if (rb.isDestroyed) continue;
 
-      const dist = player.position.distanceTo(rb.position);
-      if (dist < 2.5) {
-        // High impact hit with roadblock!
-        player.takeDamage(40);
-        player.speed *= 0.3; // abrupt slowdown!
+      const dx = player.position.x - rb.position.x;
+      const dz = player.position.z - rb.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < rb.radius) {
+        // Solid: shove the buggy back out so the barrier actually holds the line.
+        const nx = dist > 0.001 ? dx / dist : 0;
+        const nz = dist > 0.001 ? dz / dist : 1;
+        player.position.x += nx * (rb.radius - dist);
+        player.position.z += nz * (rb.radius - dist);
 
-        rb.hp -= 100;
+        const speed = Math.abs(player.speed);
+        if (speed <= 5.0) continue;   // resting against it costs nothing
+
+        // Damage lands once per contact window, not every frame (the old -100/frame erased a
+        // 180 hp block on the second frame of contact, so it never blocked anything).
+        const now = performance.now();
+        if (now - rb.lastRamAt > 450) {
+          rb.lastRamAt = now;
+          rb.hp -= Math.round(speed * 4);
+          player.takeDamage(15);
+          this.sound.playCrash(Math.min(0.7, speed / 28.0));
+        }
+        player.speed *= 0.35; // bounce off and charge again
+
         if (rb.hp <= 0) {
           rb.isDestroyed = true;
           this.policeGroup.remove(rb.mesh);
@@ -319,6 +405,7 @@ export class PoliceManager {
       this.policeGroup.remove(r.mesh);
     });
     this.roadblocks = [];
+    this.respawnQueue = [];
     this.totalWrecked = 0;
     this.sound.setSirenActive(false);
   }

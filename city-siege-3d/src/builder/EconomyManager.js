@@ -4,6 +4,9 @@
  * and manual tap-to-collect harvesting.
  */
 export class EconomyManager {
+  static get MAX_SPARE_LIVES() { return 2; }   // 1 base life + 2 spares = 3 total
+  static get LIFE_COST() { return { cash: 400, iron: 250, wood: 150 }; }
+
   constructor() {
     this.cash = 1500;
     this.iron = 800;
@@ -18,6 +21,9 @@ export class EconomyManager {
       tree: 3
     };
 
+    // Spare lives for the battle buggy. Bought at the Vehicle Tuning Lab, spent when busted.
+    // Not granted automatically - a raid starts with 1 life plus whatever you stocked here.
+    this.vehicleLives = 0;
     this.onUpdate = null;
     this.onInventoryUpdate = null;
     this.load();
@@ -122,13 +128,29 @@ export class EconomyManager {
     }
   }
 
+  buyVehicleLife() {
+    if (this.vehicleLives >= EconomyManager.MAX_SPARE_LIVES) return { ok: false, reason: 'max' };
+    if (!this.deduct(EconomyManager.LIFE_COST)) return { ok: false, reason: 'cost' };
+    this.vehicleLives++;
+    this.save();
+    return { ok: true, lives: this.vehicleLives };
+  }
+
+  consumeVehicleLife() {
+    if (this.vehicleLives <= 0) return false;
+    this.vehicleLives--;
+    this.save();
+    return true;
+  }
+
   save() {
     try {
       const state = {
         cash: this.cash,
         iron: this.iron,
         wood: this.wood,
-        inventory: this.inventory
+        inventory: this.inventory,
+        vehicleLives: this.vehicleLives
       };
       localStorage.setItem('city_siege_eco', JSON.stringify(state));
     } catch (e) {
@@ -144,6 +166,7 @@ export class EconomyManager {
         this.cash = parsed.cash ?? this.cash;
         this.iron = parsed.iron ?? this.iron;
         this.wood = parsed.wood ?? this.wood;
+        this.vehicleLives = Math.max(0, Math.min(EconomyManager.MAX_SPARE_LIVES, parsed.vehicleLives ?? 0));
         if (parsed.inventory && typeof parsed.inventory === 'object') {
           this.inventory = parsed.inventory;
         }
