@@ -308,6 +308,14 @@ export class BuildingManager {
   addMainGate(name, gx, gz, rotation) {
     const mesh = this.assetFactory.createMainGate(name, rotation);
     mesh.position.set(gx * this.tileSize, 0, gz * this.tileSize);
+
+    // Shadows at the insertion point rather than 31 scattered per-mesh flags across 139 meshes.
+    // Previously roofs, chimneys, pillars, trim and props cast nothing, so buildings read as
+    // flat colour blocks with no self-shadowing.
+    mesh.traverse(o => {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    });
+
     this.buildingGroup.add(mesh);
 
     const b = {
@@ -327,36 +335,54 @@ export class BuildingManager {
     return b;
   }
 
+  /**
+   * Single source of truth for turning a building type + level into a mesh.
+   * Both addBuilding() and completeConstruction() route through here so a type can never
+   * be placeable-but-not-upgradeable (or silently morph into a Town Hall on upgrade).
+   * Returns null for unknown types - callers MUST handle null rather than substituting a mesh.
+   */
+  createMeshFor(type, level = 1) {
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+    const f = this.assetFactory;
+
+    switch (type) {
+      case 'town_hall':     return f.createTownHall(lvl);
+      case 'police_station':return f.createPoliceStation(lvl);
+      case 'petrol_pump':   return f.createPetrolPump(lvl);
+      case 'lumber_mill':   return f.createLumberMill(lvl);
+      case 'iron_foundry':  return f.createIronFoundry(lvl);
+      case 'cash_mint':     return f.createCashMint(lvl);
+      case 'builder_hut':   return f.createBuilderHut(lvl);
+      case 'spike_trap':    return f.createSpikeTrap(lvl);
+      case 'roadblock':     return f.createRoadblock(lvl);
+      case 'tree':          return f.createPineTree(lvl);
+      case 'vehicle_lab':   return f.createVehicleLab ? f.createVehicleLab(lvl) : null;
+      case 'weapons_lab':   return f.createWeaponsLab ? f.createWeaponsLab(lvl) : null;
+      case 'sniper_tower':  return f.createSniperTower ? f.createSniperTower(lvl) : null;
+      case 'tesla_coil':    return f.createTeslaCoil ? f.createTeslaCoil(lvl) : null;
+      case 'laser_obelisk': return f.createLaserObelisk ? f.createLaserObelisk(lvl) : null;
+      default:              return null;
+    }
+  }
+
   addBuilding(type, gx, gz, level = 1) {
     const def = this.catalog[type];
     if (!def) return null;
 
-    let mesh = null;
-    if (type === 'town_hall') {
-      mesh = this.assetFactory.createTownHall(level);
-    } else if (type === 'police_station') {
-      mesh = this.assetFactory.createPoliceStation(level);
-    } else if (type === 'petrol_pump') {
-      mesh = this.assetFactory.createPetrolPump();
-    } else if (type === 'lumber_mill') {
-      mesh = this.assetFactory.createLumberMill(level);
-    } else if (type === 'iron_foundry') {
-      mesh = this.assetFactory.createIronFoundry(level);
-    } else if (type === 'cash_mint') {
-      mesh = this.assetFactory.createCashMint(level);
-    } else if (type === 'spike_trap') {
-      mesh = this.assetFactory.createSpikeTrap();
-    } else if (type === 'roadblock') {
-      mesh = this.assetFactory.createRoadblock();
-    } else if (type === 'builder_hut') {
-      mesh = this.assetFactory.createBuilderHut(level);
-    } else if (type === 'tree') {
-      mesh = this.assetFactory.createPineTree();
+    const mesh = this.createMeshFor(type, level);
+    if (!mesh) {
+      console.error(`[BuildingManager] No mesh factory for building type "${type}".`);
+      return null;
     }
 
-    if (!mesh) return null;
-
     mesh.position.set(gx * this.tileSize, 0, gz * this.tileSize);
+
+    // Shadows at the insertion point rather than scattered per-mesh flags (only 31 of 139
+    // meshes set castShadow, so roofs, chimneys, pillars and props cast nothing).
+    mesh.traverse(o => {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    });
+
     this.buildingGroup.add(mesh);
 
     const b = {
@@ -510,21 +536,14 @@ export class BuildingManager {
       building.constructionMesh = null;
     }
 
-    let newMesh = null;
-    if (building.type === 'town_hall') {
-      newMesh = this.assetFactory.createTownHall(Math.min(3, nextLvl));
-    } else if (building.type === 'lumber_mill') {
-      newMesh = this.assetFactory.createLumberMill(Math.min(3, nextLvl));
-    } else if (building.type === 'iron_foundry') {
-      newMesh = this.assetFactory.createIronFoundry(Math.min(3, nextLvl));
-    } else if (building.type === 'cash_mint') {
-      newMesh = this.assetFactory.createCashMint(Math.min(3, nextLvl));
-    } else if (building.type === 'police_station') {
-      newMesh = this.assetFactory.createPoliceStation(Math.min(3, nextLvl));
-    } else if (building.type === 'builder_hut') {
-      newMesh = this.assetFactory.createBuilderHut(Math.min(3, nextLvl));
-    } else {
-      newMesh = this.assetFactory.createTownHall(Math.min(3, nextLvl));
+    // Rebuild the mesh at the new tier. Previously any type without an explicit branch fell
+    // through to createTownHall(), so upgrading a petrol pump literally turned it into a
+    // courthouse and dropped its gameplay userData flags. Now an unknown type keeps its
+    // existing mesh and only its stats improve.
+    let newMesh = this.createMeshFor(building.type, nextLvl);
+    if (!newMesh) {
+      console.warn(`[BuildingManager] No tiered mesh for "${building.type}" - keeping current model.`);
+      newMesh = building.mesh;
     }
 
     newMesh.position.copy(worldPos);

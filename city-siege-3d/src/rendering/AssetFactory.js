@@ -55,6 +55,15 @@ export class AssetFactory {
       roadLine: new THREE.MeshStandardMaterial({ color: 0xffeb3b, roughness: 0.6 }),
       sidewalk: new THREE.MeshStandardMaterial({ color: 0xb0bec5, roughness: 0.85 })
     };
+
+    // Balance image-based lighting per material. The scene environment map makes metals read
+    // properly, but applied at full strength to every surface it washes the whole city out.
+    // Metals want the reflections; brick, wood, concrete and grass do not.
+    Object.values(this.materials).forEach(m => {
+      if (!m.isMeshStandardMaterial) return;
+      m.envMapIntensity = (m.metalness || 0) >= 0.5 ? 1.0 : 0.35;
+      m.needsUpdate = true;
+    });
   }
 
   // --- BUILDINGS ---
@@ -430,6 +439,480 @@ export class AssetFactory {
     return group;
   }
 
+  // --- RESEARCH LABS ---
+
+  createVehicleLab(level = 1) {
+    const group = new THREE.Group();
+    group.name = 'vehicle_lab';
+    group.userData.isLab = true;
+
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+
+    if (lvl === 1) {
+      // Tier 1: Brick Garage with an open hydraulic car lift on the apron
+      const garage = new THREE.Mesh(new THREE.BoxGeometry(5.2, 2.6, 3.2), this.materials.brickRed);
+      garage.position.set(0, 1.3, -1.1);
+      garage.castShadow = true;
+      garage.receiveShadow = true;
+      group.add(garage);
+
+      // Flat concrete roof slab
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3.5), this.materials.concrete);
+      roof.position.set(0, 2.75, -1.1);
+      roof.castShadow = true;
+      group.add(roof);
+
+      // Roll-up steel bay door with hazard stripe header
+      const bayDoor = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.0, 0.12), this.materials.steel);
+      bayDoor.position.set(0, 1.0, 0.55);
+      group.add(bayDoor);
+
+      const bayStripe = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.25, 0.16), this.materials.hazardStripe);
+      bayStripe.position.set(0, 2.15, 0.55);
+      group.add(bayStripe);
+
+      // Concrete work apron
+      const apron = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 2.6), this.materials.concrete);
+      apron.position.set(0, 0.06, 1.9);
+      apron.receiveShadow = true;
+      group.add(apron);
+
+      // Hydraulic lift post and raised platform
+      const liftPost = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 1.2, 8), this.materials.steel);
+      liftPost.position.set(0, 0.6, 1.9);
+      liftPost.castShadow = true;
+      group.add(liftPost);
+
+      const liftPlate = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.16, 1.5), this.materials.ironDark);
+      liftPlate.position.set(0, 1.28, 1.9);
+      liftPlate.castShadow = true;
+      group.add(liftPlate);
+
+      // Project car up on the lift
+      const carBody = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.5, 2.4), this.materials.carPaintRed);
+      carBody.position.set(0, 1.95, 1.9);
+      carBody.castShadow = true;
+      group.add(carBody);
+
+      const carCabin = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.35, 1.0), this.materials.carGlass);
+      carCabin.position.set(0, 2.36, 1.7);
+      group.add(carCabin);
+
+      for (let x of [-0.72, 0.72]) {
+        for (let z of [1.2, 2.6]) {
+          const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.2, 10), this.materials.tireRubber);
+          tire.rotation.z = Math.PI / 2;
+          tire.position.set(x, 1.7, z);
+          group.add(tire);
+        }
+      }
+
+      // Stack of spare tires beside the lift
+      for (let i = 0; i < 3; i++) {
+        const spare = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.2, 10), this.materials.tireRubber);
+        spare.position.set(-2.4, 0.11 + i * 0.22, 2.3);
+        group.add(spare);
+      }
+    } else if (lvl === 2) {
+      // Tier 2: Concrete dyno lab - rolling road dynamometer with telemetry console
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.4, 5.6), this.materials.concrete);
+      plinth.position.y = 0.2;
+      plinth.receiveShadow = true;
+      group.add(plinth);
+
+      const hall = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.0, 2.8), this.materials.concrete);
+      hall.position.set(0, 1.9, -1.3);
+      hall.castShadow = true;
+      group.add(hall);
+
+      // Glass observation band for the test engineers
+      const glassBand = new THREE.Mesh(new THREE.BoxGeometry(5.25, 0.8, 2.85), this.materials.carGlass);
+      glassBand.position.set(0, 2.7, -1.3);
+      group.add(glassBand);
+
+      // Steel roof deck and neon lab sign
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3.1), this.materials.ironDark);
+      deck.position.set(0, 3.55, -1.3);
+      deck.castShadow = true;
+      group.add(deck);
+
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.5, 0.14), this.materials.neonCyan);
+      sign.position.set(0, 4.0, -0.1);
+      group.add(sign);
+
+      // Dynamometer rollers the test car sits on
+      const rollers = [];
+      for (let z of [1.1, 2.4]) {
+        const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 2.4, 12), this.materials.steel);
+        roller.rotation.z = Math.PI / 2;
+        roller.position.set(0, 0.85, z);
+        roller.castShadow = true;
+        group.add(roller);
+        rollers.push(roller);
+      }
+
+      // Test car strapped onto the dyno
+      const testCar = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.55, 2.6), this.materials.carPaintRed);
+      testCar.position.set(0, 2.0, 1.75);
+      testCar.castShadow = true;
+      group.add(testCar);
+
+      const testCabin = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 1.1), this.materials.carGlass);
+      testCabin.position.set(0, 2.45, 1.5);
+      group.add(testCabin);
+
+      const wheels = [];
+      for (let x of [-0.75, 0.75]) {
+        for (let z of [1.1, 2.4]) {
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.22, 10), this.materials.tireRubber);
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.set(x, 1.65, z);
+          group.add(wheel);
+          wheels.push(wheel);
+        }
+      }
+
+      // Telemetry console with a live power-curve readout
+      const consoleBox = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.6), this.materials.ironDark);
+      consoleBox.position.set(-2.4, 0.9, 1.7);
+      consoleBox.castShadow = true;
+      group.add(consoleBox);
+
+      const screen = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.55, 0.08), this.materials.cyberBlue);
+      screen.position.set(-2.4, 1.15, 2.03);
+      group.add(screen);
+
+      // Exhaust extraction ducting
+      const duct = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 2.0, 8), this.materials.steel);
+      duct.position.set(2.3, 1.4, 2.4);
+      group.add(duct);
+
+      const ductElbow = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 1.4, 8), this.materials.steel);
+      ductElbow.rotation.z = Math.PI / 2;
+      ductElbow.position.set(1.7, 2.4, 2.4);
+      group.add(ductElbow);
+
+      // Rollers and wheels spin while the car is under load
+      group.userData.animator = (delta) => {
+        rollers.forEach(r => { r.rotation.x += delta * 14; });
+        wheels.forEach(w => { w.rotation.x += delta * 14; });
+      };
+    } else {
+      // Tier 3: Wind tunnel aero lab - ducted test section with an intake fan
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.4, 5.6), this.materials.ironDark);
+      pad.position.y = 0.2;
+      pad.receiveShadow = true;
+      group.add(pad);
+
+      // Control hall behind the tunnel
+      const hall = new THREE.Mesh(new THREE.BoxGeometry(4.6, 3.2, 2.2), this.materials.ironDark);
+      hall.position.set(0, 2.0, -1.9);
+      hall.castShadow = true;
+      group.add(hall);
+
+      const hallGlass = new THREE.Mesh(new THREE.BoxGeometry(4.65, 0.9, 2.25), this.materials.cyberBlue);
+      hallGlass.position.set(0, 2.9, -1.9);
+      group.add(hallGlass);
+
+      // Main wind tunnel duct running left to right
+      const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 4.6, 12), this.materials.steel);
+      tunnel.rotation.z = Math.PI / 2;
+      tunnel.position.set(0, 2.4, 0.9);
+      tunnel.castShadow = true;
+      group.add(tunnel);
+
+      // Glass test section window
+      const viewport = new THREE.Mesh(new THREE.CylinderGeometry(1.23, 1.23, 1.6, 12), this.materials.carGlass);
+      viewport.rotation.z = Math.PI / 2;
+      viewport.position.set(0, 2.4, 0.9);
+      group.add(viewport);
+
+      // Prototype chassis inside the test section
+      const proto = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.4, 0.9), this.materials.carPaintRed);
+      proto.position.set(0, 1.9, 0.9);
+      group.add(proto);
+
+      // Duct support legs
+      for (let x of [-1.7, 1.7]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.85, 8), this.materials.steel);
+        leg.position.set(x, 0.82, 0.9);
+        leg.castShadow = true;
+        group.add(leg);
+      }
+
+      // Intake fan housing and spinning blades
+      const fanRing = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.16, 8, 12), this.materials.ironDark);
+      fanRing.rotation.y = Math.PI / 2;
+      fanRing.position.set(-2.35, 2.4, 0.9);
+      group.add(fanRing);
+
+      const fan = new THREE.Group();
+      fan.position.set(-2.35, 2.4, 0.9);
+      for (let i = 0; i < 4; i++) {
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.1, 0.42), this.materials.steel);
+        blade.rotation.x = (i * Math.PI) / 4;
+        fan.add(blade);
+      }
+      group.add(fan);
+
+      // Exhaust diffuser cone
+      const diffuser = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.1, 12), this.materials.steel);
+      diffuser.rotation.z = -Math.PI / 2;
+      diffuser.position.set(2.7, 2.4, 0.9);
+      diffuser.castShadow = true;
+      group.add(diffuser);
+
+      // Neon airflow streak markers over the duct
+      const streaks = [];
+      for (let i = 0; i < 3; i++) {
+        const streak = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.08), this.materials.neonCyan);
+        streak.position.set(-1.6 + i * 1.6, 3.75, 0.9);
+        group.add(streak);
+        streaks.push(streak);
+      }
+
+      // Telemetry mast on the control hall
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 2.2, 8), this.materials.steel);
+      mast.position.set(-1.8, 4.7, -1.9);
+      group.add(mast);
+
+      const mastLamp = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), this.materials.neonYellow);
+      mastLamp.position.set(-1.8, 5.9, -1.9);
+      group.add(mastLamp);
+
+      // Fan spins and the airflow streaks scroll down the tunnel
+      group.userData.animator = (delta) => {
+        fan.rotation.x += delta * 7;
+        streaks.forEach(s => {
+          s.position.x += delta * 4.5;
+          if (s.position.x > 2.4) s.position.x = -2.4;
+        });
+      };
+    }
+
+    return group;
+  }
+
+  createWeaponsLab(level = 1) {
+    const group = new THREE.Group();
+    group.name = 'weapons_lab';
+    group.userData.isLab = true;
+
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+
+    if (lvl === 1) {
+      // Tier 1: Ballistic concrete bunker banked into an earth berm
+      const berm = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.5, 5.4), this.materials.dirtRoad);
+      berm.position.y = 0.25;
+      berm.receiveShadow = true;
+      group.add(berm);
+
+      const bunker = new THREE.Mesh(new THREE.BoxGeometry(4.8, 1.8, 3.4), this.materials.concrete);
+      bunker.position.set(0, 1.4, -0.6);
+      bunker.castShadow = true;
+      bunker.receiveShadow = true;
+      group.add(bunker);
+
+      // Thick blast cap slab
+      const capSlab = new THREE.Mesh(new THREE.BoxGeometry(5.3, 0.45, 3.9), this.materials.concrete);
+      capSlab.position.set(0, 2.5, -0.6);
+      capSlab.castShadow = true;
+      group.add(capSlab);
+
+      // Ballistic test firing slit
+      const slit = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.35, 0.14), this.materials.policeBlack);
+      slit.position.set(0, 1.8, 1.12);
+      group.add(slit);
+
+      // Steel blast door
+      const blastDoor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.4, 0.16), this.materials.steel);
+      blastDoor.position.set(-1.5, 1.2, 1.12);
+      group.add(blastDoor);
+
+      const doorStripe = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.22, 0.2), this.materials.hazardStripe);
+      doorStripe.position.set(-1.5, 1.75, 1.12);
+      group.add(doorStripe);
+
+      // Sandbag revetment along the front
+      for (let i = 0; i < 5; i++) {
+        const bag = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.8, 6), this.materials.stone);
+        bag.rotation.z = Math.PI / 2;
+        bag.position.set(-1.6 + i * 0.8, 0.75, 2.0);
+        bag.castShadow = true;
+        group.add(bag);
+      }
+
+      // Stacked ammunition crates
+      for (let i = 0; i < 2; i++) {
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 0.7), this.materials.woodDark);
+        crate.position.set(2.1, 0.78 + i * 0.56, 1.9);
+        crate.castShadow = true;
+        group.add(crate);
+
+        const crateBand = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.14, 0.75), this.materials.hazardStripe);
+        crateBand.position.set(2.1, 0.78 + i * 0.56, 1.9);
+        group.add(crateBand);
+      }
+    } else if (lvl === 2) {
+      // Tier 2: Chemical shell foundry - casting hall, smokestack and molten vat
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.4, 5.4), this.materials.concrete);
+      slab.position.y = 0.2;
+      slab.receiveShadow = true;
+      group.add(slab);
+
+      const hall = new THREE.Mesh(new THREE.BoxGeometry(5.0, 2.9, 3.2), this.materials.ironDark);
+      hall.position.set(0, 1.85, -0.9);
+      hall.castShadow = true;
+      group.add(hall);
+
+      const brickBase = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.8, 3.3), this.materials.brickRed);
+      brickBase.position.set(0, 0.8, -0.9);
+      group.add(brickBase);
+
+      // Saw-tooth foundry roof
+      const roofPlate = new THREE.Mesh(new THREE.BoxGeometry(5.3, 0.3, 3.5), this.materials.steel);
+      roofPlate.position.set(0, 3.45, -0.9);
+      roofPlate.castShadow = true;
+      group.add(roofPlate);
+
+      // Smokestack with a hazard band
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.55, 3.4, 10), this.materials.stone);
+      stack.position.set(-1.8, 4.9, -1.4);
+      stack.castShadow = true;
+      group.add(stack);
+
+      const stackBand = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.4, 10), this.materials.hazardStripe);
+      stackBand.position.set(-1.8, 6.2, -1.4);
+      group.add(stackBand);
+
+      // Molten filling vat for chemical shell charges
+      const vat = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.7, 0.9, 12), this.materials.steel);
+      vat.position.set(1.7, 0.85, 1.5);
+      vat.castShadow = true;
+      group.add(vat);
+
+      const moltenTop = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.18, 12), this.materials.moltenIron);
+      moltenTop.position.set(1.7, 1.33, 1.5);
+      group.add(moltenTop);
+
+      // Rack of finished artillery shells
+      const rack = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.2, 0.8), this.materials.steel);
+      rack.position.set(-1.1, 0.5, 1.7);
+      group.add(rack);
+
+      for (let i = 0; i < 4; i++) {
+        const shellBody = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.9, 10), this.materials.gasRed);
+        shellBody.position.set(-2.0 + i * 0.6, 1.05, 1.7);
+        shellBody.castShadow = true;
+        group.add(shellBody);
+
+        const shellTip = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.35, 10), this.materials.neonYellow);
+        shellTip.position.set(-2.0 + i * 0.6, 1.67, 1.7);
+        group.add(shellTip);
+      }
+
+      // Chemical drums on the apron
+      for (let x of [0.4, 1.1]) {
+        const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.75, 10), this.materials.gasRed);
+        drum.position.set(x, 0.78, 2.5);
+        drum.castShadow = true;
+        group.add(drum);
+
+        const drumBand = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.16, 10), this.materials.hazardStripe);
+        drumBand.position.set(x, 0.9, 2.5);
+        group.add(drumBand);
+      }
+    } else {
+      // Tier 3: Radar telemetry rocket silo
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(3.1, 3.3, 0.4, 8), this.materials.concrete);
+      pad.position.y = 0.2;
+      pad.receiveShadow = true;
+      group.add(pad);
+
+      // Hazard ring painted around the silo mouth
+      const hazardRing = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.12, 6, 16), this.materials.hazardStripe);
+      hazardRing.rotation.x = -Math.PI / 2;
+      hazardRing.position.y = 0.42;
+      group.add(hazardRing);
+
+      // Armoured silo tube
+      const silo = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.5, 3.4, 10), this.materials.ironDark);
+      silo.position.set(-0.4, 2.1, -0.3);
+      silo.castShadow = true;
+      group.add(silo);
+
+      // Opened blast hatch petals
+      for (let s of [-1, 1]) {
+        const hatch = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.18, 1.3), this.materials.steel);
+        hatch.position.set(-0.4 + s * 1.2, 4.0, -0.3);
+        hatch.rotation.z = s * 0.9;
+        hatch.castShadow = true;
+        group.add(hatch);
+      }
+
+      // Rocket rising out of the silo
+      const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3.2, 10), this.materials.policeWhite);
+      rocket.position.set(-0.4, 3.4, -0.3);
+      rocket.castShadow = true;
+      group.add(rocket);
+
+      const rocketBand = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.35, 10), this.materials.gasRed);
+      rocketBand.position.set(-0.4, 4.3, -0.3);
+      group.add(rocketBand);
+
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.0, 10), this.materials.neonRed);
+      nose.position.set(-0.4, 5.5, -0.3);
+      group.add(nose);
+
+      for (let a = 0; a < 3; a++) {
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.7, 0.6), this.materials.ironDark);
+        const finPivot = new THREE.Group();
+        finPivot.position.set(-0.4, 2.3, -0.3);
+        finPivot.rotation.y = (a * Math.PI * 2) / 3;
+        fin.position.set(0, 0, 0.7);
+        finPivot.add(fin);
+        group.add(finPivot);
+      }
+
+      // Rotating telemetry radar dish
+      const radar = new THREE.Group();
+      radar.position.set(2.1, 0, 1.5);
+
+      const radarMast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 2.4, 8), this.materials.steel);
+      radarMast.position.y = 1.4;
+      radarMast.castShadow = true;
+      radar.add(radarMast);
+
+      const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.12, 0.35, 12), this.materials.policeWhite);
+      dish.rotation.x = 0.7;
+      dish.position.set(0, 2.8, 0.2);
+      dish.castShadow = true;
+      radar.add(dish);
+
+      const dishEmitter = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), this.materials.neonCyan);
+      dishEmitter.position.set(0, 3.1, 0.7);
+      radar.add(dishEmitter);
+      group.add(radar);
+
+      // Launch control bunker with telemetry screens
+      const control = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.2, 1.6), this.materials.concrete);
+      control.position.set(-2.1, 1.0, 1.7);
+      control.castShadow = true;
+      group.add(control);
+
+      const controlScreen = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 0.1), this.materials.cyberBlue);
+      controlScreen.position.set(-2.1, 1.2, 2.53);
+      group.add(controlScreen);
+
+      // Sweep the radar dish
+      group.userData.animator = (delta) => {
+        radar.rotation.y += delta * 1.1;
+      };
+    }
+
+    return group;
+  }
+
   // --- MAIN GATES (At least 3 Fortified Gates: North, East, South) ---
 
   createMainGate(gateName = 'North Gate', rotation = 0) {
@@ -540,6 +1023,404 @@ export class AssetFactory {
     stripe.position.y = 0.55;
     group.add(stripe);
 
+    return group;
+  }
+
+  // --- ADVANCED DEFENSE STRUCTURES ---
+
+  createSniperTower(level = 1) {
+    const group = new THREE.Group();
+    group.name = 'sniper_tower';
+    group.userData.isDefense = true;
+
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+
+    // Tier drives how high the marksman nest is lifted and how it is built
+    const legHeight = [4.0, 5.4, 7.0][lvl - 1];
+    const legMat = lvl === 1 ? this.materials.woodDark : (lvl === 2 ? this.materials.steel : this.materials.ironDark);
+    const deckMat = lvl === 1 ? this.materials.woodLight : this.materials.concrete;
+    const deckY = legHeight + 0.1;
+    const muzzleY = deckY + 0.9;
+
+    // Four splayed support legs with cross bracing
+    for (let x of [-1.4, 1.4]) {
+      for (let z of [-1.4, 1.4]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.26, legHeight, 8), legMat);
+        leg.position.set(x, legHeight / 2, z);
+        leg.castShadow = true;
+        group.add(leg);
+      }
+    }
+
+    for (let z of [-1.4, 1.4]) {
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.16, 0.16), legMat);
+      brace.position.set(0, legHeight * 0.45, z);
+      group.add(brace);
+    }
+
+    for (let x of [-1.4, 1.4]) {
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 3.0), legMat);
+      brace.position.set(x, legHeight * 0.45, 0);
+      group.add(brace);
+    }
+
+    // Marksman deck
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.22, 3.4), deckMat);
+    deck.position.y = deckY;
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    group.add(deck);
+
+    // Deck railing / armour skirt
+    const railMat = lvl === 3 ? this.materials.ironDark : (lvl === 2 ? this.materials.stone : this.materials.woodDark);
+    const railHeight = lvl === 1 ? 0.5 : 0.8;
+    const railSides = [
+      { w: 3.4, d: 0.18, x: 0, z: -1.6 },
+      { w: 3.4, d: 0.18, x: 0, z: 1.6 },
+      { w: 0.18, d: 3.4, x: -1.6, z: 0 },
+      { w: 0.18, d: 3.4, x: 1.6, z: 0 }
+    ];
+    railSides.forEach(side => {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(side.w, railHeight, side.d), railMat);
+      rail.position.set(side.x, deckY + railHeight / 2, side.z);
+      rail.castShadow = true;
+      group.add(rail);
+    });
+
+    // Nest roof - shingled at tier 1, armoured slab higher up
+    if (lvl === 1) {
+      for (let x of [-1.3, 1.3]) {
+        for (let z of [-1.3, 1.3]) {
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.2, 0.14), this.materials.woodDark);
+          post.position.set(x, deckY + 0.7, z);
+          group.add(post);
+        }
+      }
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.2, 4), this.materials.logRoof);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.y = deckY + 1.9;
+      roof.castShadow = true;
+      group.add(roof);
+    } else {
+      const canopy = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.26, 3.6), this.materials.ironDark);
+      canopy.position.y = deckY + 1.9;
+      canopy.castShadow = true;
+      group.add(canopy);
+
+      for (let x of [-1.5, 1.5]) {
+        const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.8, 0.18), this.materials.steel);
+        pillar.position.set(x, deckY + 0.9, 1.5);
+        pillar.castShadow = true;
+        group.add(pillar);
+      }
+
+      // Back wall with an optics visor
+      const backWall = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.8, 0.2), this.materials.concrete);
+      backWall.position.set(0, deckY + 0.9, -1.6);
+      backWall.castShadow = true;
+      group.add(backWall);
+
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.4, 0.1), this.materials.cyberBlue);
+      visor.position.set(0, deckY + 1.2, -1.72);
+      group.add(visor);
+    }
+
+    // Weapon mount - receiver, long barrel and optics, aimed forward (+Z)
+    const mount = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.35, 8), this.materials.ironDark);
+    mount.position.set(0, deckY + 0.28, 1.0);
+    group.add(mount);
+
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.34, 1.2), this.materials.ironDark);
+    receiver.position.set(0, muzzleY, 0.65);
+    receiver.castShadow = true;
+    group.add(receiver);
+
+    const barrelStart = 1.2;
+    const barrelLength = [1.5, 1.9, 2.3][lvl - 1];
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, barrelLength, 8), this.materials.steel);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, muzzleY, barrelStart + barrelLength / 2);
+    barrel.castShadow = true;
+    group.add(barrel);
+
+    // Muzzle brake at the barrel tip
+    const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.26, 8), this.materials.ironDark);
+    muzzleBrake.rotation.x = Math.PI / 2;
+    muzzleBrake.position.set(0, muzzleY, barrelStart + barrelLength);
+    group.add(muzzleBrake);
+
+    // Telescopic sight, energised at tier 3
+    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.8, 8), this.materials.policeBlack);
+    scope.rotation.x = Math.PI / 2;
+    scope.position.set(0, muzzleY + 0.3, 0.9);
+    group.add(scope);
+
+    const scopeLens = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8), this.materials.neonRed);
+    scopeLens.rotation.x = Math.PI / 2;
+    scopeLens.position.set(0, muzzleY + 0.3, 1.32);
+    group.add(scopeLens);
+
+    if (lvl === 3) {
+      // Railgun accelerator coils along the barrel
+      for (let i = 0; i < 3; i++) {
+        const coil = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.06, 6, 10), this.materials.neonCyan);
+        coil.rotation.x = Math.PI / 2;
+        coil.position.set(0, muzzleY, 1.6 + i * 0.6);
+        group.add(coil);
+      }
+
+      // Bipod feet on the deck
+      for (let x of [-0.4, 0.4]) {
+        const bipod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.8, 6), this.materials.steel);
+        bipod.rotation.z = x > 0 ? 0.4 : -0.4;
+        bipod.position.set(x, deckY + 0.5, 1.45);
+        group.add(bipod);
+      }
+    }
+
+    // Access ladder up the back leg
+    for (let i = 0; i < Math.floor(legHeight / 0.55); i++) {
+      const rung = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.08), this.materials.steel);
+      rung.position.set(0, 0.5 + i * 0.55, -1.5);
+      group.add(rung);
+    }
+
+    group.userData.muzzleHeight = muzzleY;
+    return group;
+  }
+
+  createTeslaCoil(level = 1) {
+    const group = new THREE.Group();
+    group.name = 'tesla_coil';
+    group.userData.isDefense = true;
+
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+
+    // Taller column and fatter toroid with every tier
+    const columnHeight = [2.6, 3.6, 4.8][lvl - 1];
+    const columnTop = 1.3 + columnHeight;
+    const emitterY = columnTop + 0.35;
+
+    // Octagonal concrete footing
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.5, 0.4, 8), this.materials.concrete);
+    pad.position.y = 0.2;
+    pad.receiveShadow = true;
+    group.add(pad);
+
+    // Painted hazard ring - do not stand here
+    const hazardRing = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.11, 6, 16), this.materials.hazardStripe);
+    hazardRing.rotation.x = -Math.PI / 2;
+    hazardRing.position.y = 0.42;
+    group.add(hazardRing);
+
+    // Transformer housing
+    const housing = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.25, 0.9, 8), this.materials.ironDark);
+    housing.position.y = 0.85;
+    housing.castShadow = true;
+    group.add(housing);
+
+    // Copper primary coil wrapped around the housing
+    const primary = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.13, 6, 12), this.materials.gold);
+    primary.rotation.x = -Math.PI / 2;
+    primary.position.y = 1.25;
+    group.add(primary);
+
+    // Insulator column
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, columnHeight, 8), this.materials.steel);
+    column.position.y = 1.3 + columnHeight / 2;
+    column.castShadow = true;
+    group.add(column);
+
+    // Stacked ceramic insulator discs
+    const discCount = 3 + lvl;
+    for (let i = 0; i < discCount; i++) {
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.58, 0.14, 8), this.materials.policeWhite);
+      disc.position.y = 1.55 + i * ((columnHeight - 0.6) / discCount);
+      group.add(disc);
+    }
+
+    // Secondary windings appear once the coil is upgraded
+    if (lvl >= 2) {
+      for (let i = 0; i < 3; i++) {
+        const winding = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.08, 6, 12), this.materials.gold);
+        winding.rotation.x = -Math.PI / 2;
+        winding.position.y = 1.9 + i * (columnHeight / 4);
+        group.add(winding);
+      }
+    }
+
+    // High voltage toroid emitter and glowing plasma core
+    const toroid = new THREE.Mesh(new THREE.TorusGeometry(0.75 + lvl * 0.12, 0.3, 8, 12), this.materials.steel);
+    toroid.rotation.x = -Math.PI / 2;
+    toroid.position.y = emitterY;
+    toroid.castShadow = true;
+    group.add(toroid);
+
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.34 + lvl * 0.05, 10, 8), this.materials.neonCyan);
+    core.position.y = emitterY;
+    group.add(core);
+
+    // Crackling arc spikes that flicker around the emitter
+    const arcs = new THREE.Group();
+    arcs.position.y = emitterY;
+    const arcCount = 3 + lvl;
+    for (let i = 0; i < arcCount; i++) {
+      const arc = new THREE.Mesh(new THREE.ConeGeometry(0.09, 1.0 + lvl * 0.2, 6), this.materials.neonCyan);
+      const angle = (i * Math.PI * 2) / arcCount;
+      arc.position.set(Math.cos(angle) * 0.9, 0.35, Math.sin(angle) * 0.9);
+      arc.rotation.z = -Math.cos(angle) * 0.8;
+      arc.rotation.x = Math.sin(angle) * 0.8;
+      arcs.add(arc);
+    }
+    group.add(arcs);
+
+    // Satellite discharge nodes on the top tier
+    if (lvl === 3) {
+      for (let x of [-1.5, 1.5]) {
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 2.0, 8), this.materials.ironDark);
+        mast.position.set(x, 1.4, 0);
+        mast.castShadow = true;
+        group.add(mast);
+
+        const node = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), this.materials.cyberBlue);
+        node.position.set(x, 2.5, 0);
+        group.add(node);
+      }
+    }
+
+    // Grounding cables anchored to the pad
+    for (let a = 0; a < 4; a++) {
+      const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.6, 6), this.materials.ironDark);
+      cable.position.set(Math.cos((a * Math.PI) / 2) * 1.5, 0.8, Math.sin((a * Math.PI) / 2) * 1.5);
+      cable.rotation.z = Math.cos((a * Math.PI) / 2) * 0.35;
+      cable.rotation.x = -Math.sin((a * Math.PI) / 2) * 0.35;
+      group.add(cable);
+    }
+
+    // Arcs strobe and rotate, core pulses with charge
+    group.userData.animator = (delta, elapsed) => {
+      arcs.rotation.y += delta * 2.4;
+      arcs.children.forEach((arc, i) => {
+        arc.visible = Math.sin(elapsed * 14 + i * 1.7) > 0.1;
+      });
+      core.scale.setScalar(1.0 + Math.sin(elapsed * 9) * 0.15);
+    };
+
+    group.userData.muzzleHeight = emitterY;
+    return group;
+  }
+
+  createLaserObelisk(level = 1) {
+    const group = new THREE.Group();
+    group.name = 'laser_obelisk';
+    group.userData.isDefense = true;
+
+    const lvl = Math.max(1, Math.min(3, Math.round(level) || 1));
+
+    // The monolith grows and gains focusing hardware with each tier
+    const shaftHeight = [4.2, 5.4, 6.8][lvl - 1];
+    const shaftTop = 0.8 + shaftHeight;
+    const lensY = shaftTop + 1.05;
+
+    // Stepped plinth
+    const step1 = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.4, 4.4), this.materials.concrete);
+    step1.position.y = 0.2;
+    step1.receiveShadow = true;
+    group.add(step1);
+
+    const step2 = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.4, 3.4), this.materials.ironDark);
+    step2.position.y = 0.6;
+    step2.castShadow = true;
+    group.add(step2);
+
+    // Glowing power glyph ring on the plinth
+    const glyphRing = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.09, 6, 16), this.materials.neonRed);
+    glyphRing.rotation.x = -Math.PI / 2;
+    glyphRing.position.y = 0.82;
+    group.add(glyphRing);
+
+    // Tapered four-sided obsidian monolith
+    const shaftGeo = new THREE.CylinderGeometry(0.6, 1.1, shaftHeight, 4);
+    shaftGeo.rotateY(Math.PI / 4);
+    const shaft = new THREE.Mesh(shaftGeo, this.materials.policeBlack);
+    shaft.position.y = 0.8 + shaftHeight / 2;
+    shaft.castShadow = true;
+    group.add(shaft);
+
+    // Energy channels cut into each face, angled to follow the taper
+    const faceTilt = Math.atan(0.354 / shaftHeight);
+    for (let a = 0; a < 4; a++) {
+      const pivot = new THREE.Group();
+      pivot.position.y = 0.8 + shaftHeight * 0.48;
+      pivot.rotation.y = (a * Math.PI) / 2;
+
+      const channel = new THREE.Mesh(new THREE.BoxGeometry(0.16, shaftHeight * 0.62, 0.1), this.materials.neonRed);
+      channel.position.z = 0.62;
+      channel.rotation.x = -faceTilt;
+      pivot.add(channel);
+      group.add(pivot);
+    }
+
+    // Reinforcing collar where the shaft meets the plinth
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.35, 2.0), this.materials.steel);
+    collar.position.y = 0.95;
+    collar.castShadow = true;
+    group.add(collar);
+
+    // Emitter head - capstone, housing ring and focusing crystal
+    const capGeo = new THREE.ConeGeometry(0.85, 0.9, 4);
+    capGeo.rotateY(Math.PI / 4);
+    const capstone = new THREE.Mesh(capGeo, this.materials.ironDark);
+    capstone.position.y = shaftTop + 0.45;
+    capstone.castShadow = true;
+    group.add(capstone);
+
+    const housing = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.14, 8, 12), this.materials.steel);
+    housing.rotation.x = -Math.PI / 2;
+    housing.position.y = shaftTop + 0.85;
+    group.add(housing);
+
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), this.materials.neonRed);
+    lens.position.y = lensY;
+    group.add(lens);
+
+    // Orbiting focusing rings unlock at tier 2 and stack up at tier 3
+    const rings = [];
+    if (lvl >= 2) {
+      const ringCount = lvl === 3 ? 3 : 1;
+      for (let i = 0; i < ringCount; i++) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.85 + i * 0.22, 0.07, 6, 16), this.materials.neonCyan);
+        ring.rotation.x = -Math.PI / 2 + i * 0.4;
+        ring.position.y = lensY - i * 0.35;
+        group.add(ring);
+        rings.push(ring);
+      }
+    }
+
+    // Capacitor pylons feeding the monolith at the top tier
+    if (lvl === 3) {
+      for (let x of [-1.5, 1.5]) {
+        const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.8, 0.45), this.materials.ironDark);
+        pylon.position.set(x, 1.7, 0);
+        pylon.castShadow = true;
+        group.add(pylon);
+
+        const cell = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), this.materials.neonRed);
+        cell.position.set(x, 2.7, 0);
+        group.add(cell);
+      }
+    }
+
+    // Focusing rings orbit while the lens charges
+    group.userData.animator = (delta, elapsed) => {
+      rings.forEach((ring, i) => {
+        ring.rotation.z += delta * (1.2 + i * 0.6);
+      });
+      glyphRing.rotation.z += delta * 0.8;
+      lens.scale.setScalar(1.0 + Math.sin(elapsed * 4) * 0.18);
+    };
+
+    group.userData.muzzleHeight = lensY;
     return group;
   }
 

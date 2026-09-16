@@ -196,6 +196,9 @@ export class AttackManager {
     // 2. Register Gate Turrets
     this.turrets.clear();
     this.turrets.registerGates(this.buildings.getMainGates());
+    // Placed defensive structures (sniper towers, tesla coils, laser obelisks) now fight back too.
+    // Must come AFTER registerGates(), which resets the turret list.
+    this.turrets.registerDefenses(this.buildings.buildings);
 
     // 3. Spawn police cruisers from active police stations
     this.police.clear();
@@ -320,8 +323,12 @@ export class AttackManager {
     this.cards.reset();
     this.destruction.clearEffects();
 
-    // Reset destroyed buildings visually for continued building
+    // Restore razed buildings for the builder phase. Clearing mesh.visible alone left
+    // isDestroyed set until the NEXT attack called DestructionEngine.reset(), so factories
+    // stopped producing and the builder count sagged in between raids.
     this.buildings.buildings.forEach(b => {
+      b.isDestroyed = false;
+      b.hp = b.maxHp;
       if (b.mesh) b.mesh.visible = true;
       if (b.isMainGate && b.mesh.userData.doors) {
         b.mesh.userData.doors.forEach(d => {

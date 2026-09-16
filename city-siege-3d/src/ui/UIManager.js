@@ -260,14 +260,27 @@ export class UIManager {
       this.renderShopCatalog();
     } else if (screen === 'RECON') {
       if (this.reconBanner) this.reconBanner.classList.remove('hidden');
+      this.grid.setMode('locked');
     } else if (screen === 'COMBAT') {
       if (this.combatHud) this.combatHud.classList.remove('hidden');
+      this.grid.setMode('locked');
     } else if (screen === 'RESULT') {
       if (this.resultModal) this.resultModal.classList.remove('hidden');
+      this.grid.setMode('locked');
     }
   }
 
   _initHomeNavigation() {
+    // index.html declares #btn-abort-recon but nothing ever bound it, so recon was a one-way
+    // door: the only way out was to commit to an attack or reload the page.
+    const btnAbort = document.getElementById('btn-abort-recon');
+    if (btnAbort) {
+      btnAbort.addEventListener('click', () => {
+        if (this.sound) this.sound.playClick();
+        if (this.onAbortRecon) this.onAbortRecon();
+      });
+    }
+
     // Attack Button
     const btnAttack = document.getElementById('btn-attack-city');
     if (btnAttack) {
@@ -642,6 +655,10 @@ export class UIManager {
   }
 
   showBuildingInspector(building) {
+    // The city grid listens on window, so a stray combat click used to pop this panel over
+    // the HUD mid-raid. Allow-list the builder screens so future screens stay covered too.
+    if (this.currentScreen !== 'HOME' && this.currentScreen !== 'DESIGN' && this.currentScreen !== 'SHOP') return;
+
     if (!this.inspectorModal) return;
     if (!building) {
       this.currentInspectedBuilding = null;
@@ -1044,7 +1061,7 @@ export class UIManager {
     // 5. Center Player Assault Vehicle Pointer
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(-playerHeading); // points in forward driving direction
+    ctx.rotate(Math.PI - playerHeading); // points in forward driving direction
     ctx.fillStyle = '#00e5ff';
     ctx.beginPath();
     ctx.moveTo(0, -7);

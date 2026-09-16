@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
 
 /**
  * SceneManager - Sets up Three.js scene, cameras, lighting, shadows,
@@ -19,8 +25,13 @@ export class SceneManager {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.0;
     this.container.appendChild(this.renderer.domElement);
+
+    // Image-based lighting. Without an environment map every metalness>0.7 material
+    // (steel, ironDark, gold, carPaintRed) has nothing to reflect and renders as a dead grey
+    // slab - which was most of the city. This is the single biggest visual win per line.
+    this._initEnvironment();
 
     // Cameras
     this._initCameras();
@@ -28,8 +39,14 @@ export class SceneManager {
     // Lighting
     this._initLights();
 
+    // Atmospheric sky, driven by the same sun vector as the key light
+    this._initSky();
+
     // Ground & Environment
     this._initGround();
+
+    // Post-processing chain (needs activeCamera, so it comes after _initCameras)
+    this._initComposer();
 
     // Resize listener
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -202,21 +219,81 @@ export class SceneManager {
     });
   }
 
+  _initEnvironment() {
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    pmrem.compileEquirectangularShader();
+    this.envRT = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    this.scene.environment = this.envRT.texture;
+    pmrem.dispose();
+  }
+
+  _initSky() {
+    // A real scattering sky replaces the flat colour fill, so the horizon reads as atmosphere
+    // instead of a hard seam where flat blue meets flat green.
+    this.nightBackdrop = new THREE.Color(0x1a2634);
+    this.sky = new Sky();
+    this.sky.scale.setScalar(10000);
+    const u = this.sky.material.uniforms;
+    u.turbidity.value = 8.0;
+    u.rayleigh.value = 1.6;
+    u.mieCoefficient.value = 0.005;
+    u.mieDirectionalG.value = 0.8;
+
+    // Drive the sky's sun from the SAME vector as the key light so they always agree.
+    const sunDir = this.sunLight.position.clone().normalize();
+    u.sunPosition.value.copy(sunDir);
+    this.scene.add(this.sky);
+    this.scene.background = null;
+  }
+
+  _initComposer() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const dpr = this.renderer.getPixelRatio();
+
+    // Rendering to a target drops the context's MSAA, so request samples on the target itself.
+    // HalfFloat prevents banding in the bloom accumulation.
+    const rt = new THREE.WebGLRenderTarget(w * dpr, h * dpr, {
+      samples: 4,
+      type: THREE.HalfFloatType
+    });
+
+    this.composer = new EffectComposer(this.renderer, rt);
+    this.composer.setSize(w, h);
+    this.composer.setPixelRatio(dpr);
+
+    // Kept as a field: setCameraMode() must repoint it or the composer renders the wrong camera.
+    this.renderPass = new RenderPass(this.scene, this.activeCamera);
+    this.composer.addPass(this.renderPass);
+
+    // 11 materials set emissive up to intensity 2.0 (neon, sirens, molten iron, nitro).
+    // With no bloom they clamped to flat pastel and read as painted-on, not glowing.
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.5, 0.92);
+    this.composer.addPass(this.bloomPass);
+
+    this.composer.addPass(new OutputPass());
+  }
+
   _initLights() {
     // Soft Ambient Light
-    this.hemiLight = new THREE.HemisphereLight(0xe5f2ff, 0x2e4632, 0.95);
+    this.hemiLight = new THREE.HemisphereLight(0xbcd8ff, 0x2e4632, 0.30);
     this.hemiLight.position.set(0, 60, 0);
     this.scene.add(this.hemiLight);
 
     // Sun / Main Directional Shadow Light (Crisp, warm daylight)
-    this.sunLight = new THREE.DirectionalLight(0xfffaea, 1.75);
-    this.sunLight.position.set(80, 130, 60);
+    this.sunLight = new THREE.DirectionalLight(0xfff2d0, 2.6);
+    // ~37deg raking key light, deliberately OFF-AXIS from the builder camera at (90,105,90).
+    // The old sun sat at the same ~45deg azimuth as the camera, so every shadow fell directly
+    // behind its own building and was invisible; combined with a near-overhead angle the city
+    // read as flat colour blocks. Now shadows rake across the view and give the city depth.
+    this.sunLight.position.set(-70, 75, 70);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.width = 2048;
     this.sunLight.shadow.mapSize.height = 2048;
     this.sunLight.shadow.camera.near = 10;
     this.sunLight.shadow.camera.far = 300;
-    const shadowD = 80;
+    // Tighter frustum = ~2x the effective shadow resolution for free.
+    const shadowD = 95;
     this.sunLight.shadow.camera.left = -shadowD;
     this.sunLight.shadow.camera.right = shadowD;
     this.sunLight.shadow.camera.top = shadowD;
@@ -238,7 +315,8 @@ export class SceneManager {
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x3d7034,
       roughness: 0.88,
-      metalness: 0.02
+      metalness: 0.02,
+      envMapIntensity: 0.3
     });
     this.ground = new THREE.Mesh(groundGeo, groundMat);
     this.ground.rotation.x = -Math.PI / 2;
@@ -310,20 +388,30 @@ export class SceneManager {
     this.alarmLight.intensity = 2.5 + Math.abs(flash) * 3.0;
   }
 
+  /**
+   * Daylight scattering sky for the city/builder view, flat dark backdrop for the night raid.
+   * The scene now uses a Sky mesh, so scene.background is null in daylight - writing
+   * background.setHex() directly would throw.
+   */
+  _setSkyMood(isDaylight) {
+    if (this.sky) this.sky.visible = isDaylight;
+    this.scene.background = isDaylight ? null : this.nightBackdrop;
+  }
+
   setCameraMode(mode) {
     if (mode === 'builder') {
       this.activeCamera = this.builderCamera;
       this.scene.fog = null; // Always 100% clear for home and city builder!
-      this.scene.background.setHex(0x385c7e);
+      this._setSkyMood(true);
     } else if (mode === 'recon') {
       this.activeCamera = this.reconCamera;
       this.scene.fog = null;
-      this.scene.background.setHex(0x1a2634);
+      this._setSkyMood(false);
       this.setDesignGridVisible(false);
     } else if (mode === 'combat') {
       this.activeCamera = this.combatCamera;
       this.scene.fog = new THREE.Fog(0x1a2634, 160, 340);
-      this.scene.background.setHex(0x1a2634);
+      this._setSkyMood(false);
       this.setDesignGridVisible(false);
     }
   }
@@ -354,6 +442,11 @@ export class SceneManager {
     this.reconCamera.updateProjectionMatrix();
 
     this.renderer.setSize(width, height);
+
+    if (this.composer) {
+      this.composer.setSize(width, height);
+      this.bloomPass.setSize(width, height);
+    }
   }
 
   startCameraSwoop(startPos, startLook, endPos, endLook, duration = 1.5, onComplete = null) {
@@ -398,6 +491,11 @@ export class SceneManager {
   }
 
   render() {
+    if (this.composer) {
+      this.renderPass.camera = this.activeCamera;
+      this.composer.render();
+      return;
+    }
     this.renderer.render(this.scene, this.activeCamera);
   }
 }

@@ -330,12 +330,20 @@ export class GridSystem {
         return;
       }
 
-      // Consume 1 from player inventory
+      // Place building on map FIRST - addBuilding returns null for any type that has no
+      // mesh factory, and consuming the inventory item before that check silently destroyed
+      // the player's purchase (cash + iron + wood) with nothing placed on the map.
+      const b = this.buildingManager.addBuilding(type, gx, gz, 1);
+      if (!b) {
+        console.error(`[GridSystem] No mesh factory for building type "${type}" - placement aborted, inventory refunded.`);
+        this.sound.playCrash(0.3);
+        return;
+      }
+
+      // Only now is the placement real - consume 1 from player inventory
       this.economy.consumeFromInventory(type);
 
-      // Place building on map
-      const b = this.buildingManager.addBuilding(type, gx, gz, 1);
-      if (b) {
+      {
         this.sound.playPlace();
         if (this.onInventoryPlaced) {
           this.onInventoryPlaced(type);

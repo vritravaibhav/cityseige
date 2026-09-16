@@ -564,6 +564,15 @@ export class CardSystem {
   }
 
   reset() {
+    // Deactivate BEFORE zeroing the timers. The restore path lives only in update()'s expiry
+    // branch, so snapping activeTimer to 0 used to skip it - crashing with invisibility or nitro
+    // up left the flag set forever, and every later siege ran as an untouchable ghost.
+    // Guarded because AttackManager.launchBreach() calls reset() before setPlayer().
+    if (this.playerRef) {
+      this.playerRef.setInvisibility(false);
+      this.playerRef.setNitro(false);
+    }
+
     this.cards.forEach(c => {
       c.currentCooldown = 0;
       c.activeTimer = 0;

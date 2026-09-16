@@ -16,6 +16,11 @@ export class DestructionEngine {
     this.particleGroup.name = 'destruction_effects';
     this.scene.add(this.particleGroup);
 
+    // Shared geometries. These used to be allocated per explosion and never disposed;
+    // with twin cannons at a 0.14s interval that is ~14 fireballs + ~200 debris boxes a second.
+    this._fireGeo = new THREE.SphereGeometry(0.5, 12, 12);
+    this._debrisGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+
     this.totalBuildingsCount = 0;
     this.destroyedBuildingsCount = 0;
     this.lootedResources = { cash: 0, iron: 0, wood: 0 };
@@ -59,17 +64,19 @@ export class DestructionEngine {
   }
 
   spawnExplosion(x, y, z, size = 'medium') {
-    const radius = size === 'huge' ? 6.0 : size === 'large' ? 4.0 : 2.5;
-    const count = size === 'huge' ? 24 : 14;
+    // 'small' is what every non-lethal cannon hit passes; without its own tier it fell through
+    // to the medium branch and threw 14 shadow-casting chunks per glancing shot.
+    const radius = size === 'huge' ? 6.0 : size === 'large' ? 4.0 : size === 'small' ? 1.2 : 2.5;
+    const count = size === 'huge' ? 24 : size === 'small' ? 3 : 14;
 
-    // Fireball Sphere Mesh
-    const fireGeo = new THREE.SphereGeometry(radius * 0.5, 12, 12);
+    // Fireball Sphere Mesh (shared unit geometry, scaled per blast)
     const fireMat = new THREE.MeshBasicMaterial({
       color: 0xff5722,
       transparent: true,
       opacity: 0.95
     });
-    const fireball = new THREE.Mesh(fireGeo, fireMat);
+    const fireball = new THREE.Mesh(this._fireGeo, fireMat);
+    fireball.scale.setScalar(radius);
     fireball.position.set(x, y, z);
     this.particleGroup.add(fireball);
 
@@ -79,14 +86,13 @@ export class DestructionEngine {
       maxLife: 0.6,
       update: (delta, p) => {
         const progress = 1.0 - p.life / p.maxLife;
-        fireball.scale.setScalar(1.0 + progress * 2.5);
+        fireball.scale.setScalar(radius * (1.0 + progress * 2.5));
         fireMat.opacity = Math.max(0, 1.0 - progress);
         if (progress > 0.4) fireMat.color.setHex(0x333333); // smoke transition
       }
     });
 
-    // Flying Debris Chunks
-    const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    // Flying Debris Chunks (shared geometry, shared materials from the asset factory)
     const debrisMats = [
       this.assetFactory.materials.concrete,
       this.assetFactory.materials.brickRed,
@@ -96,9 +102,9 @@ export class DestructionEngine {
 
     for (let i = 0; i < count; i++) {
       const mat = debrisMats[Math.floor(Math.random() * debrisMats.length)];
-      const chunk = new THREE.Mesh(boxGeo, mat);
+      const chunk = new THREE.Mesh(this._debrisGeo, mat);
       chunk.position.set(x, y, z);
-      chunk.castShadow = true;
+      chunk.castShadow = (size !== 'small');
       this.particleGroup.add(chunk);
 
       const angle = Math.random() * Math.PI * 2;
@@ -199,10 +205,65 @@ export class DestructionEngine {
       if (b.isDestroyed || !b.mesh) continue;
 
       const bPos = b.mesh.position;
-      const dx = carPos.x - bPos.x;
-      const dz = carPos.z - bPos.z;
-      const dist = Math.hypot(dx, dz);
-      const hitRadius = b.isMainGate ? 4.8 : 3.2;
+
+      // Main gates are an ARCHWAY, not a solid block: two pillars at local x = +/-3.2 with a
+      // driveable gap between them. A single 4.8m circle centred on the gate origin covered its
+      // own doorway, which sealed the city - the whole point of the breach is to drive through.
+      // Collide against each pillar separately so the opening stays open.
+      let dx, dz, dist, hitRadius;
+      if (b.isMainGate) {
+        const r = b.mesh.rotation.y || 0;
+        const cos = Math.cos(r);
+        const sin = Math.sin(r);
+        const PILLAR_OFFSET = 3.2;
+        const PILLAR_RADIUS = 1.6;
+
+        let best = Infinity;
+        let bx = 0;
+        let bz = 1;
+        for (const side of [-1, 1]) {
+          // Local (side*3.2, 0, 0) -> world, for a Y-rotation of r
+          const px = bPos.x + side * PILLAR_OFFSET * cos;
+          const pz = bPos.z - side * PILLAR_OFFSET * sin;
+          const pdx = carPos.x - px;
+          const pdz = carPos.z - pz;
+          const pd = Math.hypot(pdx, pdz);
+          if (pd < best) {
+            best = pd;
+            bx = pdx;
+            bz = pdz;
+          }
+        }
+        dx = bx;
+        dz = bz;
+        dist = best;
+        hitRadius = PILLAR_RADIUS;
+      } else {
+        dx = carPos.x - bPos.x;
+        dz = carPos.z - bPos.z;
+        dist = Math.hypot(dx, dz);
+        hitRadius = 3.2;
+      }
+
+      // Low barricades are meant to be SMASHED THROUGH (they carry their own hp: roadblock 300,
+      // spike trap 200). Treating them as solid architecture pinned the buggy against a barrier
+      // at 2 MPH indefinitely, with speed *= 0.45 reapplied every frame and no way past it.
+      const isRammable = (b.type === 'roadblock' || b.type === 'spike_trap');
+      if (isRammable && dist < hitRadius && !player.isAirborne) {
+        if (speed > 5.0) {
+          // Ram damage scales with impact speed - a fast charge bursts straight through.
+          this.damageBuilding(b, Math.round(speed * 7), buildings, policeManager);
+          player.speed *= 0.88;
+          player.camShake = Math.min(1.0, player.camShake + 0.2);
+        } else {
+          // Crawling into it: nudge clear so you can never get permanently wedged.
+          const nx = dist > 0.001 ? (dx / dist) : 0;
+          const nz = dist > 0.001 ? (dz / dist) : 1;
+          player.position.x += nx * (hitRadius - dist);
+          player.position.z += nz * (hitRadius - dist);
+        }
+        continue;
+      }
 
       if (dist < hitRadius && !player.isAirborne) {
         // SOLID PHYSICAL OBSTACLE - BUILDINGS ARE NOT DESTROYED BY COLLISION!
@@ -232,6 +293,8 @@ export class DestructionEngine {
       p.update(delta, p);
       if (p.life <= 0) {
         this.particleGroup.remove(p.mesh);
+        // The fireball material is the only per-explosion allocation left; release it.
+        if (p.mesh.material && p.mesh.material.dispose) p.mesh.material.dispose();
         this.particles.splice(i, 1);
       }
     }

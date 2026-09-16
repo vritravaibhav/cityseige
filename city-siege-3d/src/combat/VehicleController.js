@@ -144,6 +144,10 @@ export class VehicleController {
   }
 
   spawnAt(x, z, heading = 0) {
+    // Clear per-run buff state so a crash mid-nitro/invisibility cannot carry into the next raid.
+    this.isInvisible = false;
+    this.isNitro = false;
+    this.isInvulnerable = false;
     this.position.set(x, 0, z);
     this.heading = heading;
     this.speed = 0;
@@ -234,7 +238,7 @@ export class VehicleController {
     }
   }
 
-  update(delta) {
+  update(delta, buildings = [], policeManager = null, destructionEngine = null) {
     this.damageImmunityTimer = Math.max(0, this.damageImmunityTimer - delta);
 
     if (this.isCrashed) {
@@ -286,17 +290,34 @@ export class VehicleController {
     const nextX = this.position.x + forwardX * this.speed * delta;
     const nextZ = this.position.z + forwardZ * this.speed * delta;
 
-    // Full freedom of movement anywhere inside fortified perimeter walls (radius ~88m)
+    // Full freedom of movement anywhere inside fortified perimeter walls (radius ~88m).
+    // The buggy breaches from OUTSIDE the wall (spawns ~98m out, beyond the gate), so driving
+    // inward must always be allowed - otherwise the assault is frozen at the spawn point.
     const mapRadius = 88.0;
     const distFromCenter = Math.hypot(nextX, nextZ);
+    const currentDist = Math.hypot(this.position.x, this.position.z);
 
-    if (distFromCenter < mapRadius) {
+    if (distFromCenter < mapRadius || distFromCenter < currentDist) {
       this.position.x = nextX;
       this.position.z = nextZ;
+      this._wallContact = false;
     } else {
-      // Gentle bounce at perimeter wall
-      this.speed *= -0.3;
-      this.sound.playCrash(0.4);
+      // Let the buggy SLIDE along the fence instead of rejecting both axes together, and thud
+      // only once per impact - this branch runs every frame while you are pressed against the
+      // wall, which previously meant ~60 crash sounds and 60 speed inversions per second.
+      const slideX = Math.hypot(nextX, this.position.z);
+      const slideZ = Math.hypot(this.position.x, nextZ);
+      if (slideX < mapRadius || slideX < currentDist) {
+        this.position.x = nextX;
+      } else if (slideZ < mapRadius || slideZ < currentDist) {
+        this.position.z = nextZ;
+      }
+
+      if (!this._wallContact && Math.abs(this.speed) > 4.0) {
+        this.speed *= -0.3;
+        this.sound.playCrash(0.4);
+      }
+      this._wallContact = true;
     }
 
     // 5. Vertical Jump & Gravity
