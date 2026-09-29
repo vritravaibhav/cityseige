@@ -270,7 +270,7 @@ export class TurretSystem {
       // hit sphere is wide, and could otherwise hop straight over the buggy.
       const passed = this._step.closestPointToPoint(target, true, this._closest).distanceTo(target);
       if (passed < DIRECT_HIT_RADIUS && !player.isAirborne) {
-        player.takeDamage(p.damage, { pierce: p.pierce || 0 });
+        player.takeDamage(p.damage, { pierce: p.pierce || 0, type: p.type, round: p.id });
         this.removeProjectile(i);
         continue;
       }
@@ -291,6 +291,10 @@ export class TurretSystem {
     const round = {
       mesh,
       type,
+      // Every round carries its own id, and hands it to takeDamage with the hit: damage is
+      // attributable to the round that landed it. Counting hits by matching the AMOUNT instead
+      // made the e2e silo check a coin toss - two missiles could score three "hits".
+      id: ++TurretSystem._roundSeq,
       damage,
       homing: turret ? turret.homing : null,
       splashRadius: turret ? turret.splashRadius : 0,
@@ -374,7 +378,7 @@ export class TurretSystem {
     if (player.isAirborne) return;
     const dist = at.distanceTo(player.position.clone().add(new THREE.Vector3(0, 0.8, 0)));
     const dmg = splashDamageAt(p.damage, p.splashRadius, dist);
-    if (dmg > 0) player.takeDamage(dmg, { pierce: p.pierce || 0 });
+    if (dmg > 0) player.takeDamage(dmg, { pierce: p.pierce || 0, type: p.type, round: p.id });
   }
 
   /**
@@ -392,7 +396,7 @@ export class TurretSystem {
     this.projectileGroup.add(mesh);
     this.beams.push({ mesh, life: 0.15, maxLife: 0.15 });
 
-    player.takeDamage(turret.damage, { pierce: turret.pierce || 0 });
+    player.takeDamage(turret.damage, { pierce: turret.pierce || 0, type: turret.type });
     this.sound.playTurretFire();
   }
 
@@ -418,3 +422,6 @@ export class TurretSystem {
     this._lastTarget = null;
   }
 }
+
+/** Round ids, unique for the life of the page (see fireBullet). */
+TurretSystem._roundSeq = 0;

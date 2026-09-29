@@ -354,15 +354,25 @@ export class EconomyManager {
       if (!saved) return;
       parsed = JSON.parse(saved);
     } catch (e) {
-      // The first save() after boot overwrites the key with the starter bank, so park the
-      // unreadable blob under a .bak key first (as CityPersistence and GarageManager do).
-      // Only claiming to keep it lost it on the very first tap.
+      // Two different failures land here. If `saved` is null the READ itself threw, so there is
+      // no save and no bank to lose - storage is simply unavailable (private window, blocked
+      // site data). Otherwise the blob is unparseable: the first save() after boot overwrites
+      // the key with the starter bank, so park it under a .bak key first (as CityPersistence
+      // and GarageManager do). Only claiming to keep it lost it on the very first tap, and
+      // claiming a .bak that was never written was just as misleading.
+      if (!saved) {
+        console.error('[economy] localStorage is unavailable; starting from the starter bank. ' +
+          'Progress will not be saved this session.');
+        return;
+      }
       const bak = EconomyManager.SAVE_KEY + '.bak';
+      let kept = false;
       try {
-        if (saved) localStorage.setItem(bak, saved);
+        localStorage.setItem(bak, saved);
+        kept = true;
       } catch (_) { /* quota */ }
       console.error('[economy] save was unreadable; starting from the starter bank. ' +
-        'The unreadable save was kept at ' + bak + '.');
+        (kept ? 'The unreadable save was kept at ' + bak + '.' : 'It could not be backed up.'));
       return;
     }
     if (!parsed || typeof parsed !== 'object') return;

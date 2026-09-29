@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILDING_DEFS, RAID_KIND_SHARE, auraRadiusFor, raidDefenseFor, raidGemsFor, townHallRow } from '../data/progression.js';
+import { BUILDING_DEFS, RAID_BASE_LIVES, RAID_COVER_SHARE, RAID_KIND_SHARE, auraRadiusFor, raidDefenseFor, raidGemsFor, townHallRow } from '../data/progression.js';
 
 /**
  * AttackManager - Coordinates pre-attack reconnaissance, direct 3D map gate tapping,
@@ -227,8 +227,8 @@ export class AttackManager {
     this.raidDefense = raidDefenseFor(this.buildings.buildings, this.buildings.getTownHallLevel());
     this.raidThreat = this.raidDefense.covered;
 
-    // Three lives per raid, plus any spares stocked at the Vehicle Tuning Lab.
-    this.baseLives = 3;
+    // RAID_BASE_LIVES lives per raid, plus any spares stocked at the Vehicle Tuning Lab.
+    this.baseLives = RAID_BASE_LIVES;
     this.raidLives = this.baseLives + (this.economy.vehicleLives || 0);
     this.respawnsUsed = 0;
     this.crashHandling = false;
@@ -490,20 +490,26 @@ export class AttackManager {
 
     // Gems: a win pays the Town Hall's bounty - the only earnable source of the
     // instant-finish currency - scaled by how much city AND how much defense was actually
-    // at stake (progression.raidGemsFor). Stowing the city and razing a lone Town Hall pays
-    // nothing, and every kind of defense stowed first (the guns, the EMPs, the traps) costs gems.
+    // at stake (progression.raidGemsFor, paid on raidDefenseFor's `score`). Stowing the city and
+    // razing a lone Town Hall pays nothing, and lifting ANY one kind of defense off the city
+    // first (the guns, the pursuit, the EMPs, the Citadel, the traps) costs the completeness
+    // premium - far more than that kind's share of the average cover.
     if (outcome === 'victory' && this.economy.addGems) {
       const th = this.buildings.getTownHallLevel();
       const row = townHallRow(th);
       const threat = this.raidThreat || 0;
-      const gems = raidGemsFor(th, finalStats.total, threat);
+      const score = this.raidDefense ? this.raidDefense.score : 0;
+      const gems = raidGemsFor(th, finalStats.total, score);
       if (gems > 0) this.economy.addGems(gems);
       this.attackStats.gems = gems;
       this.attackStats.gemBounty = row.raidGems;
       this.attackStats.gemMinTargets = row.raidMinTargets;
       this.attackStats.gemKinds = this.raidDefense ? this.raidDefense.total : 0;
       this.attackStats.gemKindShare = RAID_KIND_SHARE;
+      this.attackStats.gemCoverShare = RAID_COVER_SHARE;
       this.attackStats.gemThreat = threat;
+      this.attackStats.gemWeakest = this.raidDefense ? this.raidDefense.weakest : 0;
+      this.attackStats.gemPresent = this.raidDefense ? this.raidDefense.kinds.filter(k => k.cover > 0).length : 0;
       this.attackStats.gemShort = this.raidDefense
         ? this.raidDefense.kinds.filter(k => k.cover < 1).map(k => (BUILDING_DEFS[k.type] ? BUILDING_DEFS[k.type].name : k.type))
         : [];

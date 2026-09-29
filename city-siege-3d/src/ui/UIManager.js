@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { limitFor, MAX_TOWN_HALL_LEVEL, MAX_BUILDING_LEVEL, unlocksAt, gemsToFinish, formatDuration, BUILDING_DEFS, labForTrackLevel, trackCapFor, producePayout, RAIDER_BASE, CARD_UPTIME_CAP } from '../data/progression.js';
+import { limitFor, MAX_TOWN_HALL_LEVEL, MAX_BUILDING_LEVEL, unlocksAt, gemsToFinish, formatDuration, BUILDING_DEFS, labForTrackLevel, trackCapFor, producePayout, RAIDER_BASE, CARD_UPTIME_CAP, RAID_BASE_LIVES } from '../data/progression.js';
 import { TRACKS, CARD_ORDER, CARD_META, CARD_MAX_LEVEL, GarageManager } from '../builder/GarageManager.js';
 import { EconomyManager } from '../builder/EconomyManager.js';
 /**
@@ -210,7 +210,12 @@ export class UIManager {
         if (t.remaining < shortest) shortest = t.remaining;
       });
       const timeStr = shortest < 999999 ? ` (${formatDuration(shortest)})` : '';
-      this.builderCountEl.textContent = `${free} / ${total} Labour Free${timeStr}`;
+      // Stowing a Labour Hut (or parking one with a layout template) while its job runs leaves
+      // more jobs running than the city has slots. The job still finishes - it runs on its own
+      // deadline - but nothing new can start, so say that rather than "0 / 2 Labour Free".
+      this.builderCountEl.textContent = busy > total
+        ? `${busy} working / ${total} Labour${timeStr}`
+        : `${free} / ${total} Labour Free${timeStr}`;
       this.builderCountEl.style.color = free === 0 ? '#ff5252' : '#ffd700';
     } else {
       this.builderCountEl.textContent = `${free} / ${total} Labour Free`;
@@ -1167,7 +1172,7 @@ export class UIManager {
       }
       case 'buy-life': {
         const r = this.economy.buyVehicleLife(this.buildings.getTownHallLevel());
-        if (r.ok) ok(`🚗 Spare life stocked (${3 + r.lives} lives total)`);
+        if (r.ok) ok(`🚗 Spare life stocked (${RAID_BASE_LIVES + r.lives} lives total)`);
         else fail(r.reason === 'max' ? 'Max spare lives stocked' : 'Not enough resources');
         break;
       }
@@ -1313,7 +1318,7 @@ export class UIManager {
           <span class="deck-title ${loadout.length === 0 ? 'deck-empty' : ''}">${loadout.length === 0 ? 'NO CARDS EQUIPPED' : 'NEXT RAID DECK'}</span>
           &nbsp;<span id="garage-deck-count">${loadout.length}/${slots}</span>
         </span>
-        <span id="garage-lives-total">🚗 Lives 3 + ${spare} spare</span>
+        <span id="garage-lives-total">🚗 Lives ${RAID_BASE_LIVES} + ${spare} spare</span>
       </div>
       <div class="garage-deck-row">${boxes}</div>
       ${benched > 0 ? `<div class="garage-deck-warning">${benched} card(s) benched - deck slots shrank to ${slots}. They return when the lab is rebuilt.</div>` : ''}
@@ -1536,9 +1541,9 @@ export class UIManager {
           <div class="lab-lives-panel">
             <div class="lab-lives-row">
               <span>🚗 Buggy lives per raid</span>
-              <strong>3 base + ${spare} spare</strong>
+              <strong>${RAID_BASE_LIVES} base + ${spare} spare</strong>
             </div>
-            <div class="lab-lives-note">Every raid starts with 3 lives. Spares (max ${max}) are used once those are gone. A spare is priced for your Town Hall (Town Hall ${thLvl} now).</div>
+            <div class="lab-lives-note">Every raid starts with ${RAID_BASE_LIVES} lives. Spares (max ${max}) are used once those are gone. A spare is priced for your Town Hall (Town Hall ${thLvl} now).</div>
             ${atMax ? '' : this._garageReqRows(lifeCost, res)}
             <button id="btn-garage-buy-life" class="btn-primary" data-action="buy-life" ${(atMax || !canAffordLife) ? 'disabled' : ''}>${lifeBtnText}</button>
           </div>
@@ -1726,7 +1731,7 @@ export class UIManager {
           </div>
           <div class="lab-lives-row">
             <span>🚗 Buggy lives per raid</span>
-            <strong>3 base + ${spare} spare</strong>
+            <strong>${RAID_BASE_LIVES} base + ${spare} spare</strong>
           </div>
           <div class="lab-lives-note">Upgrades, ability cards, the raid deck and spare lives are managed in the Vehicle Garage.</div>
           <button id="btn-open-garage-from-lab" class="btn-primary">🔧 OPEN VEHICLE GARAGE</button>
@@ -2377,17 +2382,27 @@ export class UIManager {
    * Why a win paid less than the full bounty: the size and the kinds of defense the full bounty
    * needs (progression.raidDefenseFor - every gun, pursuit base, trap and aura type the Town Hall
    * allows, each at RAID_KIND_SHARE of its limit), what this city had, and which kinds fell short.
+   * `gemThreat` is a LEVEL-WEIGHTED score, not a count of the kinds the city owns: printed in
+   * the slot a reader reads as a count, it told a Town Hall 3 player who owned all six kinds at
+   * level 1 that the city 'had 2 of 6 kinds' and then listed all six as short. The count and
+   * the score are now separate, and the list says what it means - short of FULL COVER, which a
+   * kind can be either by being absent or by standing below the Town Hall's level.
    */
   _gemShortfallText(stats) {
     // +1e-6 first: summing per-kind cover leaves 11.999999999999996, which floored to '11.9'.
     const covered = Math.floor((stats.gemThreat || 0) * 10 + 1e-6) / 10;
+    const kindsTotal = stats.gemKinds || 0;
+    const present = stats.gemPresent === undefined ? kindsTotal : stats.gemPresent;
     const short = stats.gemShort || [];
     const named = short.length > 6 ? `${short.slice(0, 6).join(', ')} and ${short.length - 6} more` : short.join(', ');
-    const kinds = stats.gemKinds === 1 ? 'the one kind of defense' : `all ${stats.gemKinds} kinds of defense`;
+    const kinds = kindsTotal === 1 ? 'the one kind of defense' : `all ${kindsTotal} kinds of defense`;
+    const premium = Math.round(100 * (1 - (stats.gemCoverShare === undefined ? 1 : stats.gemCoverShare)));
     return `(the full ${stats.gemBounty} needs ${stats.gemMinTargets}+ structures and ${kinds} your Town Hall allows - ` +
       `every gun, pursuit base, trap and aura building type, ${Math.round(100 * (stats.gemKindShare || 0))}% of each type's build limit standing at your Town Hall's level; ` +
-      `this city had ${stats.total} ${stats.total === 1 ? 'structure' : 'structures'} and ${covered} of ${stats.gemKinds} ${stats.gemKinds === 1 ? 'kind' : 'kinds'}` +
-      `${named ? `; short: ${named}` : ''})`;
+      `${premium}% of the bounty rides on your WEAKEST kind, so one kind left out costs far more than its share. ` +
+      `This city had ${stats.total} ${stats.total === 1 ? 'structure' : 'structures'} and ${present} of ${kindsTotal} ${kindsTotal === 1 ? 'kind' : 'kinds'} on the ground, ` +
+      `defense strength ${covered.toFixed(1)} of ${kindsTotal}` +
+      `${named ? `; short of full cover: ${named}` : ''})`;
   }
 
   showToast(msg, duration = 2800) {

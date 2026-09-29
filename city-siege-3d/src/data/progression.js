@@ -259,7 +259,7 @@ export const BUILDING_DEFS = {
     buildBase: 25, unlockTH: 4, tall: false,
     turret: { range: 22.0, fireInterval: 0.9, damage: 16, muzzleHeight: 5.0, tracer: 0x00e5ff },
     desc: 'High-voltage arcs that shred anything close.',
-    helps: 'Shortest range but the fastest fire rate in the game. It is your answer to a raider who parks next to a building to shell it.'
+    helps: 'The shortest range of any turret you can build, but the fastest fire rate in the game. It is your answer to a raider who parks next to a building to shell it.'
   },
   oil_refinery: {
     name: 'Oil Refinery', category: 'economy', icon: '\u{1F3ED}', role: ROLE.PRODUCER,
@@ -972,6 +972,51 @@ export function isRaidThreat(type) {
  */
 export const RAID_KIND_SHARE = 0.6;
 
+/**
+ * How the gem bounty splits between BREADTH and COMPLETENESS: RAID_COVER_SHARE of it is paid
+ * pro rata on the average cover of every kind, and the rest is a completeness premium paid on
+ * the WEAKEST kind alone. So the last kind of defense is worth several gems, and a kind stowed
+ * outright takes the whole premium with it however many other kinds still stand. A city whose
+ * kinds are all equally covered is paid exactly that cover either way - the split only ever
+ * prices UNEVENNESS, which is the thing a raider farms.
+ *
+ * Why not a flat 1/kinds: gems are the only mechanical reward for defense and a raid that loses
+ * pays none, so what a player actually trades is `bounty x win rate`. Flat, one kind of eighteen
+ * was worth 25/18 = 1.39 gems at Town Hall 12 while lifting that kind off the city turned a 65%
+ * win rate into a 100% one: the raidbot earned 41% more gems with the EMP Disrupters stowed,
+ * 36% more without the SWAT Armories, 29% more without the Quantum Citadel and 17% more without
+ * the Police Stations (tools/e2e/raidbot.mjs --sweep --th 12, 72-96 raids an arm). Per-kind weights
+ * cannot fix that - the shares those four arms alone would need add up to past the whole bounty
+ * - but the premium does, because every one of them leaves a kind at zero cover and so gives up
+ * the same 1 - RAID_COVER_SHARE on top of that kind's share of the average: 10 gems of 25, well
+ * under the 16.25 a full city is worth at RAID_FULL_WIN_RATE even if stowing won every raid.
+ *
+ * The size of the premium is not a taste: a point of cover missing from the weakest kind has to
+ * cost more bounty than that point can possibly buy in win rate, or stowing pays again further
+ * up the curve. That is (1 - RAID_COVER_SHARE) + RAID_COVER_SHARE / kinds > (1 - w) / w for
+ * w = RAID_FULL_WIN_RATE, which at Town Hall 12's 18 kinds needs a premium above 50.5%.
+ * verify-progression holds every Town Hall to it and sweeps the whole cover range.
+ */
+export const RAID_COVER_SHARE = 0.45;
+
+/**
+ * Measured win rate of a raid tuned to its own Town Hall against a FULL city of that Town Hall,
+ * on the hardest tier there is: 47 wins in 72 at Town Hall 12 (tools/e2e/raidbot.mjs --th 12
+ * --runs 72 --layout shuffled --spares 2). Town Halls 1-11 win far more often, so 12 is the
+ * binding case. verify-progression sizes RAID_COVER_SHARE against it: a city with a whole kind
+ * of defense missing has to pay less than raidGems x this, because the most stowing that kind
+ * can ever buy is a raid that never loses again.
+ */
+export const RAID_FULL_WIN_RATE = 0.65;
+
+/**
+ * A victory that razed a full-size city (raidMinTargets counted structures) and beat SOME
+ * defense always pays at least this many gems, so a rushed base cannot floor to nothing: a full
+ * Town Hall 1 city paid 2 gems and then a hard 0 from the moment the hall alone reached level 2,
+ * until two Police Stations stood at level 2 - on a starting bank of STARTING_GEMS.
+ */
+export const RAID_GEMS_FLOOR = 1;
+
 /** The kinds of raid defense (isRaidThreat types) Town Hall `th` allows: what the full bounty asks for. */
 export function raidThreatKindsAt(th) {
   const T = clampTH(th);
@@ -985,10 +1030,14 @@ export function raidThreatKindsAt(th) {
  * stand at the Town Hall's level, and every defense level pays. Summing every copy instead let
  * extra low-level copies stand in for levels: a Town Hall 12 city with all defenses at level 8
  * paid the same 25 gems as one at level 12 (and was far easier to raid), so the last four levels
- * of every defense - about 115 labour-hours and 73M resources - paid nothing. Every kind weighs the same, so stowing the EMPs, the Relays, the
- * Citadel or the traps costs gems just as stowing the guns does, and the building a new Town Hall
- * unlocks is part of the bounty from the day it opens.
- * Returns { kinds: [{ type, value, need, cover }], covered (0..total), total }.
+ * of every defense - about 115 labour-hours and 73M resources - paid nothing.
+ *
+ * `score` (0..1) is what the bounty is actually paid on: RAID_COVER_SHARE of the average cover
+ * plus the rest on `weakest`, the least-covered kind (see RAID_COVER_SHARE). So stowing the
+ * EMPs, the Relays, the Citadel, the pursuit or the traps costs gems just as stowing the guns
+ * does - the same premium, whichever kind it is, on top of its share of the average - and the
+ * building a new Town Hall unlocks is part of the bounty from the day it opens.
+ * Returns { kinds: [{ type, value, need, cover }], covered (0..total), total, weakest, score }.
  */
 export function raidDefenseFor(structures, th) {
   const T = clampTH(th);
@@ -1001,14 +1050,19 @@ export function raidDefenseFor(structures, th) {
     if (k) k.strengths.push(Math.min(1, clampLevel(s.level) / T));
   }
   let covered = 0;
+  let weakest = 1;
   for (const k of kinds) {
     k.strengths.sort((a, b) => b - a);
     k.value = k.strengths.slice(0, k.need).reduce((sum, v) => sum + v, 0);
     k.cover = Math.min(1, k.value / k.need);
     delete k.strengths;
     covered += k.cover;
+    if (k.cover < weakest) weakest = k.cover;
   }
-  return { kinds, covered, total: kinds.length };
+  const score = kinds.length
+    ? RAID_COVER_SHARE * (covered / kinds.length) + (1 - RAID_COVER_SHARE) * weakest
+    : 1;
+  return { kinds, covered, total: kinds.length, weakest, score };
 }
 
 /** Kinds of defense a raid had to beat (raidDefenseFor's `covered`, 0..raidThreatKindsAt(th).length). */
@@ -1016,21 +1070,26 @@ export function raidThreatValue(structures, th) {
   return raidDefenseFor(structures, th).covered;
 }
 
+/** The 0..1 defense factor the gem bounty is paid on (raidDefenseFor's `score`). */
+export function raidDefenseScoreFor(structures, th) {
+  return raidDefenseFor(structures, th).score;
+}
+
 /**
  * Gems a victory pays: the Town Hall's bounty x city size x defense beaten. Full size is
- * `raidMinTargets` counted structures and full defense is every kind the Town Hall allows
- * (raidThreatValue); below either the bounty shrinks pro rata (rounded down), so a city missing
- * any one kind of defense is paid at least a gem less. A lone Town Hall pays nothing, and neither
- * does a big city whose defenses were all stowed.
+ * `raidMinTargets` counted structures; `defenseScore` is raidDefenseFor's 0..1 `score` - NOT a
+ * count of kinds - so a city short on size or on defense is paid pro rata, rounded down. A lone
+ * Town Hall pays nothing, and neither does a big city whose defenses were all stowed; a
+ * full-size win that beat some defense never pays less than RAID_GEMS_FLOOR.
  */
-export function raidGemsFor(th, countedTargets, threatValue) {
+export function raidGemsFor(th, countedTargets, defenseScore) {
   const row = townHallRow(th);
-  const kinds = raidThreatKindsAt(th).length;
   const n = Math.max(0, Math.floor(Number(countedTargets) || 0));
-  const threats = Math.max(0, Number(threatValue) || 0);
+  const defense = Math.min(1, Math.max(0, Number(defenseScore) || 0));
   const size = row.raidMinTargets > 0 ? Math.min(1, n / row.raidMinTargets) : 1;
-  const defense = kinds > 0 ? Math.min(1, threats / kinds) : 1;
-  return Math.floor(row.raidGems * size * defense + 1e-9);
+  const gems = Math.floor(row.raidGems * size * defense + 1e-9);
+  if (gems > 0) return gems;
+  return size >= 1 && defense > 0 ? RAID_GEMS_FLOOR : 0;
 }
 
 /** How many of `type` a Town Hall `th` city may own. 0 means still locked. */
@@ -1765,8 +1824,9 @@ export function raidModelAt(th) {
 }
 
 /**
- * Gems a brand-new player starts with. 50 finished the first seven Town Hall jobs (39 gems)
- * outright, so the opening ladder never ran on its timers; wins pay the rest (raidGems).
+ * Gems a brand-new player starts with: 15, well under the 39 gems the first seven Town Hall
+ * jobs cost to finish outright, so the opening ladder still runs on its timers. (50 paid for
+ * all seven, so it never did.) Wins pay the rest - raidGems.
  */
 export const STARTING_GEMS = 15;
 

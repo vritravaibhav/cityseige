@@ -487,14 +487,32 @@ const policeKinds = () => page.evaluate(() => {
   check(failed.length === 0 && full.outcome === 'victory' && full.total === 25 && full.gems === 4 && full.gained === 4,
     'a full TH3 city with every kind of defense at level 3 pays the full 4-gem bounty', { failed, ...full });
 
-  // Every kind counts: the same city with its traps stowed (4 of 6 kinds) is paid two thirds.
+  // Every kind counts, and the COMPLETENESS PREMIUM makes a whole kind cost far more than its
+  // share of the average (progression.RAID_COVER_SHARE): the same city with its traps stowed
+  // keeps four kinds of six and is paid 1 gem of 4, not the 2 a flat per-kind weight paid.
   failed = await buildSpread(3, guarded(3, ['spring_trap', 'landmine']));
   const noTraps = await winRaid();
   await shot('smoke-8c-traps-stowed-fewer-gems');
   await page.evaluate(() => citySiege.attackManager.returnToBuilder());
-  check(failed.length === 0 && noTraps.outcome === 'victory' && noTraps.total === 25 && noTraps.gems === 2 && noTraps.gained === 2 &&
-    /Spring Launch Trap/.test(noTraps.modal) && /Buried Landmine/.test(noTraps.modal),
-    'the same city with its spring traps and landmines stowed pays 2 of 4 gems and names what was missing', { failed, ...noTraps });
+  check(failed.length === 0 && noTraps.outcome === 'victory' && noTraps.total === 25 && noTraps.gems === 1 && noTraps.gained === 1 &&
+    /Spring Launch Trap/.test(noTraps.modal) && /Buried Landmine/.test(noTraps.modal) && /6 kinds on the ground/.test(noTraps.modal) &&
+    /defense strength 4\.0 of 6/.test(noTraps.modal),
+    'the same city with its spring traps and landmines stowed pays 1 of 4 gems, names what was missing and does not call its score a count of kinds', { failed, ...noTraps });
+
+  // ONE kind stowed, the rest untouched: the premium has to make that a losing trade even for a
+  // raider who would then never lose again (progression.RAID_FULL_WIN_RATE). Flat 1/kinds paid
+  // 3 of 4 here, and at Town Hall 12 it paid 23 of 25 for a raid the bot then won 72 times in 72.
+  failed = await buildSpread(3, guarded(3, ['swat_armory']));
+  const noSwat = await winRaid();
+  await page.evaluate(() => citySiege.attackManager.returnToBuilder());
+  const fullWin3 = await page.evaluate(async () => {
+    const P = await import('/src/data/progression.js');
+    return P.townHallRow(3).raidGems * P.RAID_FULL_WIN_RATE;
+  });
+  check(failed.length === 0 && noSwat.outcome === 'victory' && noSwat.gems === 1 && noSwat.gained === 1 && noSwat.gems < fullWin3 &&
+    /SWAT Armory/.test(noSwat.modal) && /5 of 6 kinds on the ground/.test(noSwat.modal),
+    `one kind of six stowed pays ${noSwat.gems} of 4 gems, under the ${fullWin3} a full city is worth even if stowing won every raid`,
+    { failed, ...noSwat, fullWin3 });
 
   failed = await buildSpread(3, guarded(1));
   const weak = await winRaid();
@@ -1358,6 +1376,32 @@ const placeFromInventory = (type, gx, gz) => page.evaluate(({ type, gx, gz }) =>
     'the first Labour Hut adds the first labour slot; huts past the Town Hall cap add none', lab);
 }
 
+// ---------------------------------------------------------------- stowing a busy Labour Hut reads as an overdraft, not "0 free"
+{
+  // Stowing a hut (or parking one with a layout template) while its job runs is allowed on
+  // purpose - the job runs on its own deadline and finishes - but it leaves more jobs running
+  // than the city has slots. The HUD used to call that "0 / 2 Labour Free" in red with three
+  // construction hammers visibly working.
+  const failed = await buildCity(3, [['lumber_mill', -8, -8, 1], ['iron_foundry', -8, -4, 1], ['petrol_pump', -8, 0, 1],
+    ['cash_mint', 0, -8, 1], ['big_storage', 8, 0, 1], ['builder_hut', 4, -4], ['builder_hut', -4, 4], ['builder_hut', 4, 8]]);
+  const over = await page.evaluate(() => {
+    const bm = citySiege.buildingManager, e = citySiege.economyManager, ui = citySiege.uiManager;
+    e.cash = e.iron = e.wood = 1e7;
+    ['lumber_mill', 'iron_foundry', 'petrol_pump'].forEach(t => bm.upgradeBuilding(bm.buildings.find(b => b.type === t)));
+    const before = { total: bm.totalBuilders, busy: bm.busyBuilders, free: bm.freeBuilders };
+    const stowed = bm.stowBuilding(bm.buildings.find(b => b.type === 'builder_hut'));
+    ui.updateBuilderHUD();
+    const hud = document.getElementById('builder-count').textContent;
+    const after = { total: bm.totalBuilders, busy: bm.busyBuilders, free: bm.freeBuilders };
+    const refused = bm.upgradeBuilding(bm.buildings.find(b => b.type === 'cash_mint')).reason;
+    return { before, stowed, hud, after, refused };
+  });
+  check(failed.length === 0 && over.before.busy === 3 && over.before.total === 3 && over.stowed === true &&
+    over.after.total === 2 && over.after.busy === 3 && over.after.free === 0 && /^3 working \/ 2 Labour/.test(over.hud) &&
+    over.refused === 'NO_FREE_BUILDERS',
+    'stowing a Labour Hut mid-job says "3 working / 2 Labour" instead of "0 / 2 Labour Free", and nothing new can start', over);
+}
+
 // ---------------------------------------------------------------- an unreadable eco save is parked in .bak before anything overwrites it
 {
   const good = await page.evaluate(() => { citySiege.economyManager.save(); return localStorage.getItem('city_siege_eco'); });
@@ -1371,6 +1415,23 @@ const placeFromInventory = (type, gx, gz) => page.evaluate(({ type, gx, gz }) =>
   });
   const e2 = await page.evaluate(() => ({ bak: localStorage.getItem('city_siege_eco.bak'), eco: (localStorage.getItem('city_siege_eco') || '').slice(0, 12) }));
   check(e1.bak === corrupt && e2.bak === corrupt && e2.eco.startsWith('{"v":'), 'an unreadable eco save survives the first save as city_siege_eco.bak', { e1, e2 });
+  // A blocked READ is a different failure: there is no save and no .bak, so the log must say
+  // storage is unavailable rather than name a backup it never wrote.
+  const logged = [];
+  const onConsole = (m) => { if (m.type() === 'error') logged.push(m.text()); };
+  page.on('console', onConsole);
+  const blocked = await page.evaluate(() => {
+    window.__realGet = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (k) { if (k === 'city_siege_eco') throw new Error('blocked site data'); return window.__realGet.call(this, k); };
+    localStorage.removeItem('city_siege_eco.bak');
+    try { citySiege.economyManager.load(); } finally { Storage.prototype.getItem = window.__realGet; }
+    return { bak: localStorage.getItem('city_siege_eco.bak') };
+  });
+  await page.waitForTimeout(200);
+  page.off('console', onConsole);
+  check(blocked.bak === null && logged.some(t => /localStorage is unavailable/.test(t) && /will not be saved/.test(t)) &&
+    !logged.some(t => /was kept at city_siege_eco\.bak/.test(t)),
+    'with storage blocked the economy says storage is unavailable, not that it kept a .bak it never wrote', { ...blocked, logged });
   // Put the real bank back for anything after this.
   await page.evaluate(good => { localStorage.removeItem('city_siege_eco.bak'); localStorage.setItem('city_siege_eco', good); Storage.prototype.setItem = () => {}; }, good);
   await boot();
@@ -1713,11 +1774,19 @@ const placeFromInventory = (type, gx, gz) => page.evaluate(({ type, gx, gz }) =>
     v.verticalY = 0; v.velocityY = 0; v.isAirborne = false; v.isInvulnerable = false; v.damageImmunityTimer = 0;
     v.maxHp = v.hp = 1e7; v.shield = 0; v.fireCooldown = 1e9;   // immortal, and its own gun holds fire
     v.inputs.forward = true; v.inputs.left = mode === 'circle';
-    let gameT = 0, fired = 0, hits = 0, bled = 0, minD = 1e9, maxD = 0, topSpeed = 0;
+    // Hits are counted by ROUND ID, not by matching the damage amount: any other hit worth
+    // exactly silo.damage used to be counted as a missile, and this check once read 3 hits from
+    // 2 missiles. `sameAmount` keeps the old tally so a mismatch shows up in the failure blob.
+    let gameT = 0, fired = 0, sameAmount = 0, bled = 0, minD = 1e9, maxD = 0, topSpeed = 0;
+    const landed = new Set();
     const tu = ts.update.bind(ts), fb = ts.fireBullet.bind(ts), td = v.takeDamage;
     ts.update = (dt, pl) => { gameT += dt; return tu(dt, pl); };
     ts.fireBullet = (a, b, c, type, tur) => { if (type === 'missile_silo') fired++; return fb(a, b, c, type, tur); };
-    v.takeDamage = function (amt, o) { if (amt === silo.damage) hits++; return td.call(this, amt, o); };
+    v.takeDamage = function (amt, o) {
+      if (o && o.type === 'missile_silo' && o.round !== undefined) landed.add(o.round);
+      if (amt === silo.damage) sameAmount++;
+      return td.call(this, amt, o);
+    };
     const volley = mode === 'circle' ? 20 : 3.5;
     silo.cooldown = 0;
     let forced = mode !== 'pass';
@@ -1731,7 +1800,7 @@ const placeFromInventory = (type, gx, gz) => page.evaluate(({ type, gx, gz }) =>
     }
     v.inputs.forward = v.inputs.left = false;
     ts.update = tu; ts.fireBullet = fb; delete v.takeDamage;
-    return { fired, hits, inFlight: ts.projectiles.filter(p => p.type === 'missile_silo').length, bled, speed: H.speed,
+    return { fired, hits: landed.size, sameAmount, inFlight: ts.projectiles.filter(p => p.type === 'missile_silo').length, bled, speed: H.speed,
       buggySpeed: +topSpeed.toFixed(1), fromSilo: [+minD.toFixed(1), +maxD.toFixed(1)], range: +silo.range.toFixed(1) };
   }, mode);
   const circle = await fly('circle');

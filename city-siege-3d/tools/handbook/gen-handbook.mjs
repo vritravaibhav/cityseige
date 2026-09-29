@@ -154,7 +154,7 @@ const lowTH = P.TOWN_HALLS[0], highTH = P.TOWN_HALLS[11];
 /** Gems a full Town Hall 12 city pays with every building of `stowed` types lifted off it. */
 const stowedGems = (stowed) => {
   const city = P.raidThreatKindsAt(12).filter(t => !stowed.includes(t)).flatMap(t => Array.from({ length: P.limitFor(t, 12) }, () => ({ type: t, level: 12 })));
-  return P.raidGemsFor(12, P.countedLimitFor(12), P.raidThreatValue(city, 12));
+  return P.raidGemsFor(12, P.countedLimitFor(12), P.raidDefenseScoreFor(city, 12));
 };
 const vars = {
   DATE: process.env.GEN_DATE || new Date().toISOString().slice(0, 10),
@@ -180,7 +180,8 @@ const vars = {
   KILL_MIN: P.KILL_BAND.min, KILL_MAX: P.KILL_BAND.max,
   LOOT: `cash = ${P.LOOT_PER_LEVEL.cash} × level (${P.EXPLOSIVE_LOOT_CASH} × level if it explodes), iron = ${P.LOOT_PER_LEVEL.iron} × level, wood = ${P.LOOT_PER_LEVEL.wood} × level`,
   MINT1: lowTH.raidMinTargets, KINDS1: P.raidThreatKindsAt(1).length, MINT12: highTH.raidMinTargets, KINDS12: P.raidThreatKindsAt(12).length,
-  KINDSHARE: pct(P.RAID_KIND_SHARE), GEMS12AURA: stowedGems(['emp_disrupter', 'orbital_relay', 'quantum_citadel']),
+  KINDSHARE: pct(P.RAID_KIND_SHARE), COVERSHARE: pct(P.RAID_COVER_SHARE), COVERPREMIUM: pct(1 - P.RAID_COVER_SHARE),
+  GEMS12ONE: stowedGems(['emp_disrupter']), GEMS12AURA: stowedGems(['emp_disrupter', 'orbital_relay', 'quantum_citadel']),
   GEMS12TRAPS: stowedGems(['emp_disrupter', 'orbital_relay', 'quantum_citadel', ...TYPES.filter(t => D[t].role === P.ROLE.TRAP)]),
   GATES: gates, TRACKX: P.TRACK_COST_GROWTH, SLOTS: [0, 1, 2, 3].map(l => P.deckSlotsFor(l)).join(' / '),
 };

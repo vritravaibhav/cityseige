@@ -317,6 +317,9 @@ const combatWired = [
   ['src/combat/PoliceManager.js', /pursuitUnitFor\(/, 'pursuit unit stats'],
   ['src/combat/AttackManager.js', /raidGemsFor\(/, 'raid gem bounty'],
   ['src/combat/AttackManager.js', /raidDefenseFor\(/, 'raid gem bounty: defense at stake, kind by kind'],
+  ['src/combat/AttackManager.js', /raidGemsFor\(th, finalStats\.total, score\)/, 'the bounty is paid on raidDefenseFor\'s score (breadth + the completeness premium), not on a kind count'],
+  ['src/combat/AttackManager.js', /this\.baseLives = RAID_BASE_LIVES/, 'base raid lives come from progression.RAID_BASE_LIVES'],
+  ['src/ui/UIManager.js', /RAID_BASE_LIVES/, 'the garage copy quotes progression.RAID_BASE_LIVES, not a literal 3'],
   ['src/combat/CardSystem.js', /RAIDER_BASE\.hop/, 'hop boost and recharge'],
   ['src/combat/CardSystem.js', /CARD_RECHARGES_AFTER_EFFECT/, 'Big Jump recharges on the ground'],
   // A pickup leaves its card recharging (never zeroes it), and waits while the card recharges.
@@ -494,6 +497,9 @@ check(P.splashDamageAt(95, 9, 0) === 95 && P.splashDamageAt(95, 9, 3) === 95 && 
     check(P.isRaidThreat(t) === fights, `${t}: isRaidThreat ${P.isRaidThreat(t)}, but it ${fights ? 'fights the raider' : 'does not fight the raider'}`);
   }
   check(P.RAID_KIND_SHARE >= 0.5 && P.RAID_KIND_SHARE <= 1, `RAID_KIND_SHARE ${P.RAID_KIND_SHARE} is not 50-100% of a kind's limit`);
+  check(P.RAID_COVER_SHARE > 0 && P.RAID_COVER_SHARE < 1, `RAID_COVER_SHARE ${P.RAID_COVER_SHARE} leaves the bounty with no completeness premium`);
+  check(P.RAID_FULL_WIN_RATE > 0 && P.RAID_FULL_WIN_RATE < 1, `RAID_FULL_WIN_RATE ${P.RAID_FULL_WIN_RATE} is not a win rate`);
+  check(P.RAID_GEMS_FLOOR >= 1, `RAID_GEMS_FLOOR ${P.RAID_GEMS_FLOOR} floors a full-size win at nothing`);
   const city = (kinds, th, n = (t) => P.limitFor(t, th), level = th) => kinds.flatMap(t => Array.from({ length: n(t) }, () => ({ type: t, level })));
   const kindRow = [];
   for (let th = 1; th <= 12; th++) {
@@ -507,25 +513,61 @@ check(P.splashDamageAt(95, 9, 0) === 95 && P.splashDamageAt(95, 9, 3) === 95 && 
     const atShare = city(kinds, th, (t) => Math.ceil(P.RAID_KIND_SHARE * P.limitFor(t, th)));
     const l1 = city(kinds, th, undefined, 1);
     check(P.raidGemsFor(th, 1, 0) === 0, `TH${th}: razing a lone Town Hall pays ${P.raidGemsFor(th, 1, 0)} gems`);
-    check(P.raidThreatValue(full, th) === kinds.length && P.raidGemsFor(th, row.raidMinTargets, P.raidThreatValue(full, th)) === row.raidGems,
+    check(P.raidThreatValue(full, th) === kinds.length && P.raidGemsFor(th, row.raidMinTargets, P.raidDefenseScoreFor(full, th)) === row.raidGems,
       `TH${th}: a full city with every defense at level ${th} does not pay the full bounty`);
-    check(P.raidGemsFor(th, row.raidMinTargets, P.raidThreatValue(atShare, th)) === row.raidGems,
+    check(P.raidGemsFor(th, row.raidMinTargets, P.raidDefenseScoreFor(atShare, th)) === row.raidGems,
       `TH${th}: every kind of defense at ${Math.round(100 * P.RAID_KIND_SHARE)}% of its limit does not pay the full bounty`);
     check(P.raidGemsFor(th, P.countedLimitFor(th), 0) === 0, `TH${th}: every non-defense slot filled, no defense, pays ${P.raidGemsFor(th, P.countedLimitFor(th), 0)} gems`);
     // Every kind counts: stowing all of any one kind costs gems.
     for (const t of kinds) {
-      const g = P.raidGemsFor(th, P.countedLimitFor(th), P.raidThreatValue(full.filter(s => s.type !== t), th));
+      const g = P.raidGemsFor(th, P.countedLimitFor(th), P.raidDefenseScoreFor(full.filter(s => s.type !== t), th));
       check(g < row.raidGems, `TH${th}: a full city with every ${t} stowed still pays the full ${row.raidGems} gems`);
     }
+    check(P.raidDefenseScoreFor(full, th) === 1 && P.raidDefenseScoreFor([], th) === 0,
+      `TH${th}: the defense score is ${P.raidDefenseScoreFor(full, th)} for a full city and ${P.raidDefenseScoreFor([], th)} for an empty one, not 1 and 0`);
+    // A full-size win that beat SOME defense is never paid nothing, and one that beat none is.
+    check(P.raidGemsFor(th, row.raidMinTargets, P.raidDefenseScoreFor([{ type: kinds[0], level: 1 }], th)) >= P.RAID_GEMS_FLOOR,
+      `TH${th}: a full-size win against a single level-1 ${kinds[0]} pays nothing`);
+    check(P.raidGemsFor(th, row.raidMinTargets, 0) === 0, `TH${th}: a full-size win against no defense at all is still paid`);
+
+    // THE CONTROL SWEEP, as arithmetic. Gems pay only on a WIN, so what a player really trades
+    // is `bounty x win rate`: lifting defenses off their own city is worth doing the moment the
+    // easier raid wins often enough to make up the gems it costs. The most stowing can ever buy
+    // is a raid that never loses again, and a kind cut to cover `c` can be worth at most (1 - c)
+    // of the losses a full city still takes - so that city's bounty, times that ceiling win
+    // rate, has to stay under the full bounty times RAID_FULL_WIN_RATE. Flat 1/kinds weights
+    // failed this from c = 0 up: a stowed kind still paid 23 of Town Hall 12's 25 gems while the
+    // raidbot won 72 of 72 with the EMP Disrupters off the city, 70 of 72 without the SWAT
+    // Armories and 66 of 72 without the Quantum Citadel. Re-measure with
+    // `node tools/e2e/raidbot.mjs --sweep --th 12 --runs 72 --layout shuffled`.
+    for (const t of kinds) {
+      const need = Math.max(1, Math.ceil(P.RAID_KIND_SHARE * P.limitFor(t, th)));
+      for (let standing = 0; standing < need; standing++) {
+        const thinned = full.filter(s => s.type !== t)
+          .concat(Array.from({ length: standing }, () => ({ type: t, level: th })));
+        const cover = standing / need;
+        const gThin = P.raidGemsFor(th, P.countedLimitFor(th), P.raidDefenseScoreFor(thinned, th));
+        const ceiling = P.RAID_FULL_WIN_RATE + (1 - P.RAID_FULL_WIN_RATE) * (1 - cover);
+        check(gThin * ceiling < row.raidGems * P.RAID_FULL_WIN_RATE,
+          `TH${th}: a city holding only ${standing} of ${need} ${t} pays ${gThin} gems - worth up to ${(gThin * ceiling).toFixed(2)} a raid against ${(row.raidGems * P.RAID_FULL_WIN_RATE).toFixed(2)} for the full city, so stowing ${t} pays`);
+      }
+    }
+    // The same thing as a rule rather than a sample: a point of cover missing from the WEAKEST
+    // kind has to cost more bounty than a point of win rate can ever be worth.
+    const perPoint = (1 - P.RAID_COVER_SHARE) + P.RAID_COVER_SHARE / kinds.length;
+    const buys = (1 - P.RAID_FULL_WIN_RATE) / P.RAID_FULL_WIN_RATE;
+    check(perPoint > buys,
+      `TH${th}: a point of cover off the weakest of ${kinds.length} kinds costs ${(100 * perPoint).toFixed(1)}% of the bounty, under the ${(100 * buys).toFixed(1)}% of win rate it can buy`);
+
     // Every defense level pays: a full city with every defense one level short of the Town Hall
     // is paid less than the full bounty, and more defense levels never pay less.
     if (th >= 2) {
       const short = city(kinds, th, undefined, th - 1);
-      const gShort = P.raidGemsFor(th, P.countedLimitFor(th), P.raidThreatValue(short, th));
+      const gShort = P.raidGemsFor(th, P.countedLimitFor(th), P.raidDefenseScoreFor(short, th));
       check(gShort < row.raidGems, `TH${th}: every defense at level ${th - 1} still pays the full ${row.raidGems} gems`);
       let prev = -1;
       for (let L = 1; L <= th; L++) {
-        const g = P.raidGemsFor(th, P.countedLimitFor(th), P.raidThreatValue(city(kinds, th, undefined, L), th));
+        const g = P.raidGemsFor(th, P.countedLimitFor(th), P.raidDefenseScoreFor(city(kinds, th, undefined, L), th));
         check(g >= prev, `TH${th}: defenses at level ${L} pay ${g} gems, less than at level ${L - 1} (${prev})`);
         prev = g;
       }
@@ -535,7 +577,7 @@ check(P.splashDamageAt(95, 9, 0) === 95 && P.splashDamageAt(95, 9, 3) === 95 && 
       check(Math.abs(P.raidThreatValue(extra, th) - P.raidThreatValue(lean, th)) < 1e-9, `TH${th}: extra low-level copies raise the defense score`);
     }
     if (th >= 4) {
-      const g = P.raidGemsFor(th, P.countedLimitFor(th), P.raidThreatValue(l1, th));
+      const g = P.raidGemsFor(th, P.countedLimitFor(th), P.raidDefenseScoreFor(l1, th));
       check(g <= row.raidGems / 2, `TH${th}: never upgrading a single defense still pays ${g} of ${row.raidGems} gems`);
     }
     // The building a Town Hall unlocks is worth building for the bounty too: a full city of the
@@ -544,9 +586,11 @@ check(P.splashDamageAt(95, 9, 0) === 95 && P.splashDamageAt(95, 9, 3) === 95 && 
     if (th > 1) {
       const up = city(P.raidThreatKindsAt(th - 1), th, (t) => P.limitFor(t, th - 1), th - 1);
       const added = P.newBuildingsAt(th).filter(t => P.isRaidThreat(t));
-      const g0 = P.raidGemsFor(th, P.countedLimitFor(th - 1), P.raidThreatValue(up, th));
+      const g0 = P.raidGemsFor(th, P.countedLimitFor(th - 1), P.raidDefenseScoreFor(up, th));
       check(added.length > 0 && g0 < row.raidGems,
         `TH${th}: a just-upgraded full city without its new ${added.join(', ') || 'defense (none unlocked)'} already pays ${g0} of ${row.raidGems} gems`);
+      check(g0 >= P.RAID_GEMS_FLOOR,
+        `TH${th}: a just-upgraded full city pays ${g0} gems - the step to a new Town Hall must never zero the bounty`);
     }
   }
   // The round-9 review city: a full Town Hall 12 city with its 3 EMPs, 1 Citadel and 2 Relays
@@ -554,7 +598,7 @@ check(P.splashDamageAt(95, 9, 0) === 95 && P.splashDamageAt(95, 9, 3) === 95 && 
   const full12 = city(P.raidThreatKindsAt(12), 12);
   const stowAura = full12.filter(s => !['emp_disrupter', 'quantum_citadel', 'orbital_relay'].includes(s.type));
   const stowAll = stowAura.filter(s => D[s.type].role !== P.ROLE.TRAP);
-  const g = (cityList) => P.raidGemsFor(12, P.countedLimitFor(12), P.raidThreatValue(cityList, 12));
+  const g = (cityList) => P.raidGemsFor(12, P.countedLimitFor(12), P.raidDefenseScoreFor(cityList, 12));
   check(g(stowAura) < P.townHallRow(12).raidGems && g(stowAll) < g(stowAura),
     `a full TH12 city pays ${g(full12)} gems, ${g(stowAura)} with its EMPs, Citadel and Relays stowed and ${g(stowAll)} with its traps stowed too`);
   console.log(`kinds of raid defense the full bounty needs: ${kindRow.join(', ')}; a full TH12 city pays ${g(full12)} gems, ${g(stowAura)} with its EMPs, Citadel and Relays stowed, ${g(stowAll)} with its traps stowed too`);
@@ -596,6 +640,25 @@ check(D.weapons_lab.research.cannonPerLevel >= P.HP_PER_LEVEL && /\+(\d+)% damag
   check(m && Number(m[1]) === D.emp_disrupter.aura.radius && Number(m[2]) === D.emp_disrupter.aura.radiusPerLevel,
     `EMP copy says ${m && m[1]}m +${m && m[2]}m a level, data is ${D.emp_disrupter.aura.radius}m +${D.emp_disrupter.aura.radiusPerLevel}m`);
 }
+// The Tesla Coil's reach claim. TURRET_RANGE_PER_LEVEL grows its 22 m base past the fixed
+// GATE_TURRET.range of 35 m from level 6 on, and gates are never upgradeable, so "shortest range
+// in the game" stopped being true at L6 while it stays true of every turret a player can BUY.
+// The copy now says so; hold it to the narrower claim, and to the fire rate, at every level.
+{
+  const buildable = turretTypes.filter(t => t !== 'tesla_coil');
+  check(/shortest range of any turret you can build/i.test(D.tesla_coil.helps) && !/shortest range but/i.test(D.tesla_coil.helps),
+    'Tesla Coil copy still claims the shortest range in the game (from level 6 the fixed 35 m gate gun is shorter)');
+  for (let L = 1; L <= 12; L++) {
+    const tesla = P.turretStatsFor('tesla_coil', L);
+    const shorter = buildable.filter(t => P.turretStatsFor(t, L).range <= tesla.range);
+    const faster = buildable.filter(t => P.turretStatsFor(t, L).fireInterval <= tesla.fireInterval)
+      .concat(P.GATE_TURRET.fireInterval <= tesla.fireInterval ? ['main_gate'] : []);
+    check(shorter.length === 0, `Tesla Coil L${L} reaches ${tesla.range.toFixed(1)}m, no shorter than buildable ${shorter.join(', ')}`);
+    check(faster.length === 0, `Tesla Coil L${L} fires every ${tesla.fireInterval.toFixed(2)}s, no faster than ${faster.join(', ')}`);
+  }
+  check(P.turretStatsFor('tesla_coil', 6).range > P.GATE_TURRET.range,
+    'the gate gun is no longer the shortest reach in a Town Hall 6 city - the Tesla copy can go back to "in the game"');
+}
 // Unguided rounds all fly at TurretSystem's one ROUND_SPEED: no gun's copy may promise faster ones.
 for (const t of turretTypes) {
   if (D[t].turret.homing) continue;
@@ -605,6 +668,17 @@ for (const t of turretTypes) {
 for (let wl = 1; wl <= 12; wl++) {
   const a = P.vehicleStatsFor({}, { weaponsLabLevel: wl }), b = P.vehicleStatsFor({}, { weaponsLabLevel: wl - 1 });
   check(a.cannonVsUnits > b.cannonVsUnits && a.cannonDamage >= b.cannonDamage, `Weapons Lab L${wl}: autocannon vs units ${b.cannonVsUnits} -> ${a.cannonVsUnits}`);
+}
+
+// The starter gem bank. Its comment justifies 15 against what the first seven Town Hall jobs
+// cost to finish outright; hold that 39 to the real gemsToFinish bill so the rationale cannot rot.
+{
+  let bill = 0;
+  for (let L = 2; L <= 8; L++) bill += P.gemsToFinish(P.buildSecondsFor('town_hall', L));
+  const src = fs.readFileSync(ROOT + 'src/data/progression.js', 'utf8');
+  const m = /well under the (\d+) gems the first seven Town Hall[\s*]+jobs cost/.exec(src);
+  check(m && Number(m[1]) === bill, `STARTING_GEMS comment says the opening ladder costs ${m && m[1]} gems, it costs ${bill}`);
+  check(P.STARTING_GEMS < bill, `STARTING_GEMS ${P.STARTING_GEMS} still pays for the whole opening ladder (${bill} gems)`);
 }
 
 // 15. Gunfire never shares the raider's contact buffer: only rams, blasts and police blocks
@@ -791,6 +865,14 @@ for (let th = D.drone_hangar.unlockTH; th <= 12; th++) {
     };
   };
   const nitroRow = [];
+  // Pin the silo's phase. TurretSystem opens every gun on `cooldown: Math.random() * fireInterval`
+  // and jitters each reload by TURRET_RELOAD_JITTER, and the nitro rows below ask for exactly the
+  // share of the drive nitro is NOT up - no margin at all - so one run in about forty landed 5 of
+  // 11 instead of 6 and turned the whole suite red. What is being checked here is the DRIVE
+  // ("dodging does not save the raider"), not which half-second the silo happens to open on, so
+  // the scenario is made repeatable rather than the bar lowered.
+  const realRandom = Math.random;
+  Math.random = () => 0;
   for (const th of [D.missile_silo.unlockTH, 8, 12]) {
     const road = P.trackValueFor('speed', P.trackCapFor(th)), off = road * P.BUILDING_DEFS.road.surface.offRoadSpeedMult;
     // The same laps with the Nitro Surge card of the Town Hall's raid kit tapped the moment it
@@ -828,6 +910,7 @@ for (let th = D.drone_hangar.unlockTH; th <= 12; th++) {
       }
     }
   }
+  Math.random = realRandom;
   console.log(`Missile Silo hits on a buggy that never stops (circle, slide, laps; 60 and 20 fps; TH5, 8, 12): ${siloRow.join(' ')}`);
   console.log(`... and on one lapping with nitro at its uptime cap (road, off-road; 60 and 20 fps; TH5, 8, 12): ${nitroRow.join(' ')}`);
 }
@@ -960,7 +1043,17 @@ for (let th = D.drone_hangar.unlockTH; th <= 12; th++) {
   // expected to cost more than a raid holds still passed.
   check(most <= lives, `RAID_LIVES_EXPECTED_MAX ${most} allows more lives than a raid has (${lives})`);
   const am = fs.readFileSync(ROOT + 'src/combat/AttackManager.js', 'utf8');
-  check(/this\.baseLives = 3/.test(am), 'AttackManager no longer grants 3 base lives (the model counts them)');
+  check(/this\.baseLives = RAID_BASE_LIVES/.test(am) && /RAID_BASE_LIVES[^\n]*from '\.\.\/data\/progression\.js'/.test(am),
+    'AttackManager does not take its base lives from progression.RAID_BASE_LIVES (the model counts them)');
+  // ...and the copy quotes the same constant, so RAID_BASE_LIVES cannot drift from what the
+  // garage and the tuning lab promise. It used to be a literal 3 in six places.
+  const uiSrc = fs.readFileSync(ROOT + 'src/ui/UIManager.js', 'utf8');
+  check(/RAID_BASE_LIVES[^\n]*from '\.\.\/data\/progression\.js'/.test(uiSrc), 'UIManager does not import RAID_BASE_LIVES');
+  for (const re of [/Lives \$\{RAID_BASE_LIVES\} \+ \$\{spare\} spare/, /\$\{RAID_BASE_LIVES\} base \+ \$\{spare\} spare/,
+    /Every raid starts with \$\{RAID_BASE_LIVES\} lives/, /\$\{RAID_BASE_LIVES \+ r\.lives\} lives total/]) {
+    check(re.test(uiSrc), `UIManager still hardcodes the base raid lives instead of RAID_BASE_LIVES (${re})`);
+  }
+  check(!/\b3 base \+|starts with 3 lives|Lives 3 \+|\$\{3 \+ r\.lives\}/.test(uiSrc), 'UIManager still promises a literal 3 base lives somewhere');
   const m = [];
   for (let th = 1; th <= 12; th++) m[th] = P.raidModelAt(th);
   const row = [];

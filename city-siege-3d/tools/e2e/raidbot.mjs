@@ -18,6 +18,13 @@
  *                            nearest the centre). Both obey the game's own placement rule
  *                            (BuildingManager.isFootprintBlocked and the buildable radius): a
  *                            city no player could build is reported as failedToPlace
+ *   --sweep                  THE GEM-BOUNTY CONTROL SET. Play the full city, then one arm per kind
+ *                            of raid defense the Town Hall allows with that whole kind lifted
+ *                            off the city, all on the same seeds, and print what each arm is
+ *                            worth in gems a raid (the game's own payout x how often it won).
+ *                            Exits 1 if stowing any kind earns MORE than leaving it standing -
+ *                            the inversion progression.RAID_COVER_SHARE exists to stop. Ignores
+ *                            --stow. Plays (kinds + 1) x --runs raids a Town Hall.
  *   --stow "a,b:n"           after the city is built, lift buildings off it as a player stowing
  *                            them in Big Storage would: every building of type a, the last n of
  *                            type b (the build limits are untouched, so the gem bounty still
@@ -43,6 +50,7 @@
  * are). Needs the Vite dev server on http://localhost:3000 (GAME_URL overrides).
  */
 import path from 'path';
+import * as P from '../../src/data/progression.js';
 
 const PW = process.env.PW_CORE;
 if (!PW) { console.error('Set PW_CORE to a playwright-core install directory.'); process.exit(2); }
@@ -75,6 +83,7 @@ const JSON_OUT = !!opt('json', false);
 const DETAIL = !!opt('detail', false);
 const TRACE = !!opt('trace', false);
 const MAP = !!opt('map', false);
+const SWEEP = !!opt('sweep', false);
 const PATCH = opt('patch', '') || '';
 const STOW = String(opt('stow', '') || '').split(',').map(s => s.trim()).filter(Boolean).map(s => {
   const [type, n] = s.split(':');
@@ -858,13 +867,25 @@ async function setupRaid({ th, layout, gatePick, spares, fps, seed, maxt, trace,
 }
 
 // ---------------------------------------------------------------- driver
+// An "arm" is one city to play: the full city, or the full city with some kind of defense lifted
+// off it. --sweep builds one arm per kind of raid defense the Town Hall allows; without it there
+// is a single arm, whatever --stow asked for.
+const stowLabel = (list) => (list.length
+  ? list.map(x => x.type + (x.n === Infinity ? '' : ':' + x.n)).join(',')
+  : 'full city');
+const armsFor = (th) => (SWEEP
+  ? [{ label: 'full city', stow: [] }].concat(P.raidThreatKindsAt(th)
+      .map(t => ({ label: `no ${P.BUILDING_DEFS[t].name}`, stow: [{ type: t, n: Infinity }] })))
+  : [{ label: stowLabel(STOW), stow: STOW }]);
 const jobs = [];
-for (const th of THS) for (let r = 1; r <= RUNS; r++) jobs.push({ th, run: r, seed: SEED + r - 1 + 1000 * th });
+for (const th of THS) for (const arm of armsFor(th)) for (let r = 1; r <= RUNS; r++) {
+  jobs.push({ th, arm, run: r, seed: SEED + r - 1 + 1000 * th });
+}
 
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-gl=angle', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const results = [];
 const errors = [];
-const fmtLine = (r) => `TH${String(r.th).padStart(2)} run ${r.run}: ${r.won ? 'WON ' : 'lost'}  lives ${r.livesUsed}/${r.livesTotal}  ${String(r.pct).padStart(3)}% destroyed (${r.destroyed}/${r.total})  ${String(Math.round(r.seconds)).padStart(4)}s  [${r.gate}, seed ${r.seed}]`;
+const fmtLine = (r) => `TH${String(r.th).padStart(2)} run ${r.run}${SWEEP ? ` [${r.arm}]` : ''}: ${r.won ? 'WON ' : 'lost'}  lives ${r.livesUsed}/${r.livesTotal}  ${String(r.pct).padStart(3)}% destroyed (${r.destroyed}/${r.total})  ${String(Math.round(r.seconds)).padStart(4)}s  [${r.gate}, seed ${r.seed}]`;
 
 async function worker(wid) {
   const ctx = await browser.newContext({ viewport: { width: 640, height: 400 } });
@@ -879,7 +900,7 @@ async function worker(wid) {
     await page.reload();
     await page.waitForFunction(() => window.citySiege && window.citySiege.buildingManager, null, { timeout: 30000 });
     await page.waitForTimeout(300);
-    const setup = await page.evaluate(setupRaid, { th: job.th, layout: LAYOUT, gatePick: GATE, spares: SPARES, fps: FPS, seed: job.seed, maxt: MAXT, trace: TRACE, patch: PATCH, stow: STOW });
+    const setup = await page.evaluate(setupRaid, { th: job.th, layout: LAYOUT, gatePick: GATE, spares: SPARES, fps: FPS, seed: job.seed, maxt: MAXT, trace: TRACE, patch: PATCH, stow: job.arm.stow });
     if (MAP) console.log(`TH${job.th} ${LAYOUT} city (G gate, H town hall, T gun, E EMP, Q citadel, P/W/D spawners, m mine, s/f/v traps, # ^ barriers, = road, b other):\n` + setup.map.join('\n'));
     let res;
     for (;;) {
@@ -887,6 +908,7 @@ async function worker(wid) {
       if (res.done) break;
     }
     res.run = job.run;
+    res.arm = job.arm.label;
     results.push(res);
     if (JSON_OUT) console.log(JSON.stringify(res));
     else {
@@ -905,7 +927,34 @@ await Promise.all(Array.from({ length: Math.min(JOBS, jobs.length) }, (_, i) => 
 await Promise.race([browser.close(), new Promise(r => setTimeout(r, 5000))]);
 
 // ---------------------------------------------------------------- summary
-if (!JSON_OUT) {
+// The gem-bounty control set. Gems pay only on a WIN, so what a player is really offered is
+// `the game's own payout x how often that city wins`. Every arm but the first has a whole kind
+// of defense stowed: all of them must be worth LESS a raid than the full city, or the player is
+// paid to take their own defenses down (progression.RAID_COVER_SHARE).
+if (SWEEP) {
+  const ev = (th, arm) => {
+    const rs = results.filter(r => r.th === th && r.arm === arm);
+    const won = rs.filter(r => r.won);
+    const gems = [...new Set(won.map(r => r.gems))].sort((a, b) => a - b).join('/') || '-';
+    return { n: rs.length, wins: won.length, gems, ev: rs.length ? won.reduce((s2, r) => s2 + r.gems, 0) / rs.length : 0 };
+  };
+  for (const th of THS) {
+    const arms = [...new Set(results.filter(r => r.th === th).map(r => r.arm))];
+    const base = ev(th, 'full city');
+    console.log(`\nTH${th} gem-bounty control sweep (${RUNS} raids an arm, ${LAYOUT} layout, seed ${SEED}, ${SPARES} spares)`);
+    console.log('  arm                            won      gems/win   gems a raid   verdict');
+    for (const arm of arms) {
+      const a = ev(th, arm);
+      const pays = arm !== 'full city' && a.ev >= base.ev;
+      if (pays) process.exitCode = 1;
+      console.log(`  ${arm.padEnd(30)} ${String(a.wins).padStart(3)}/${String(a.n).padEnd(3)} ${String(a.gems).padStart(9)} ${a.ev.toFixed(2).padStart(13)}   ` +
+        (arm === 'full city' ? 'baseline' : pays ? `STOWING IT PAYS (+${(a.ev - base.ev).toFixed(2)})` : `costs ${(base.ev - a.ev).toFixed(2)}`));
+    }
+  }
+  console.log(process.exitCode ? '\nSWEEP FAILED: stowing a kind of defense earns more gems than leaving it standing.'
+    : '\nSWEEP PASSES: every kind of defense is worth more standing than stowed.');
+}
+if (!JSON_OUT && !SWEEP) {
   console.log('\nTH  won  lives used (won raids)  % destroyed  seconds');
   for (const th of THS) {
     const rs = results.filter(r => r.th === th);
