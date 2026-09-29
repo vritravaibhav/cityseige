@@ -1,4 +1,17 @@
 import * as THREE from 'three';
+import {
+  BUILDING_DEFS,
+  ROLE,
+  producePayout,
+  blastFor,
+  blastDamageAt,
+  detonatesInBlast,
+  lootFor,
+  auraBonusFor,
+  auraRadiusFor,
+  SHIELD_AURA_CAP
+} from '../data/progression.js';
+import { isChainBarrier, standingBarrierIndex, barrierLinksOf, closestWallPoint } from '../builder/BarrierWalls.js';
 
 /**
  * DestructionEngine - Handles collision damage, particle explosions,
@@ -28,10 +41,49 @@ export class DestructionEngine {
     this.onBuildingDamaged = null;
   }
 
+  /** Trees: decoration only. They never stop the buggy or soak a round (see flattenScenery). */
+  isScenery(b) {
+    const def = b && BUILDING_DEFS[b.type];
+    return !!(def && def.role === ROLE.SCENERY);
+  }
+
+  /**
+   * Can a round (autocannon shell, missile) strike `b`? Not if it is razed, hidden, scenery or
+   * a drive-over trap. Rounds fly past trees, so a tree sharing a tile with a building cannot
+   * soak the fire aimed at that building; and they fly over a trap's pressure plate - the
+   * autocannon fires on its own along the buggy's heading, so a shootable trap was shot apart
+   * (level 1 in under two seconds) before the raider it lay in wait for ever reached it.
+   */
+  isShootable(b) {
+    if (!b || b.isDestroyed || !b.mesh || !b.mesh.visible) return false;
+    const def = BUILDING_DEFS[b.type];
+    return !(def && (def.role === ROLE.SCENERY || def.role === ROLE.TRAP));
+  }
+
+  /**
+   * Knock a tree flat for the rest of the raid (the buggy drove into it, or a bomb or a blast
+   * caught it). Scenery is decoration: no fireball, no rubble barrier, no loot, no score.
+   * returnToBuilder() stands it back up.
+   */
+  flattenScenery(b) {
+    if (b.isDestroyed) return;
+    b.isDestroyed = true;
+    b.hp = 0;
+    if (b.mesh) b.mesh.visible = false;
+    this.sound.playCrash(0.35);
+  }
+
+  countsTowardDestruction(b) {
+    if (!b || b.isMainGate || b.type === 'tree') return false;
+    const def = BUILDING_DEFS[b.type];
+    return !(def && def.role === 'trap');
+  }
+
   reset(buildings) {
     this.clearEffects();
-    // Gates are the way in and trees are scenery - neither counts toward 100% destruction.
-    this.totalBuildingsCount = buildings.filter(b => !b.isMainGate && b.type !== 'tree').length;
+    // Gates are the way in, trees are scenery and traps are obstacles - none of them count
+    // toward 100% destruction. (A hidden landmine counting would make 100% unreachable.)
+    this.totalBuildingsCount = buildings.filter(b => this.countsTowardDestruction(b)).length;
     this.destroyedBuildingsCount = 0;
     this.lootedResources = { cash: 0, iron: 0, wood: 0 };
 
@@ -40,6 +92,7 @@ export class DestructionEngine {
       b.isDestroyed = false;
       b.hp = b.maxHp;
       b.lastRamAt = 0;
+      b.vaultCracked = false;
       if (b.mesh) b.mesh.visible = true;
     });
 
@@ -48,12 +101,16 @@ export class DestructionEngine {
     }
   }
 
-  /** Remove every rubble pile (raid over, or a fresh raid starting). */
+  /** Remove every rubble pile and mine crater (raid over, or a fresh raid starting). */
   clearRubble(buildings) {
     (buildings || []).forEach(b => {
       if (b.rubbleMesh) {
         if (b.rubbleMesh.parent) b.rubbleMesh.parent.remove(b.rubbleMesh);
         b.rubbleMesh = null;
+      }
+      if (b.craterMesh) {
+        if (b.craterMesh.parent) b.craterMesh.parent.remove(b.craterMesh);
+        b.craterMesh = null;
       }
     });
   }
@@ -138,10 +195,16 @@ export class DestructionEngine {
     }
   }
 
-  damageBuilding(building, damage, buildingsList, policeManager) {
-    if (building.isDestroyed) return;
+  /**
+   * `chained`: the damage is an explosive building's blast, not the raider's own fire, so a
+   * building it razes pays only progression.CHAIN_LOOT_SHARE of its loot (see destroyBuilding).
+   */
+  damageBuilding(building, damage, buildingsList, policeManager, { chained = false } = {}) {
+    if (building.isDestroyed || !building.mesh) return;
 
-    building.hp -= damage;
+    // Quantum Citadel: every building inside a standing citadel's field takes less damage.
+    const shield = this._shieldFor(building, buildingsList);
+    building.hp -= damage * (1 - shield);
 
     // Surface the target's remaining health to the HUD (clamped - hp goes negative on a kill).
     if (this.onBuildingDamaged) {
@@ -149,71 +212,140 @@ export class DestructionEngine {
     }
 
     if (building.hp <= 0) {
-      this.destroyBuilding(building, buildingsList, policeManager);
+      this.destroyBuilding(building, buildingsList, policeManager, { chained });
     } else {
       this.spawnExplosion(building.mesh.position.x, 1.5, building.mesh.position.z, 'small');
       this.sound.playCrash(0.7);
     }
   }
 
-  destroyBuilding(building, buildingsList, policeManager) {
+  /**
+   * Damage reduction (0..SHIELD_AURA_CAP) from the strongest standing Quantum Citadel
+   * covering `building` - citadels do not stack. The citadel does not shield itself, so
+   * raiders can always break it.
+   */
+  _shieldFor(building, buildingsList) {
+    if (!buildingsList) return 0;
+    let best = 0;
+    for (const c of buildingsList) {
+      if (c === building || c.isDestroyed || !c.mesh) continue;
+      const def = BUILDING_DEFS[c.type];
+      if (!def || !def.aura || def.aura.kind !== 'shield') continue;
+      const lvl = c.level || 1;
+      if (c.mesh.position.distanceTo(building.mesh.position) > auraRadiusFor(c.type, lvl)) continue;
+      best = Math.max(best, auraBonusFor(c.type, lvl));
+    }
+    return Math.min(SHIELD_AURA_CAP, best);
+  }
+
+  /**
+   * Raze `building`. `chained`: an explosive building's blast razed it or set it off, not the
+   * raider's own fire (it then pays only progression.CHAIN_LOOT_SHARE of its loot - see lootFor).
+   * `chainHits`: the chain reaction this blast belongs to (building -> hardest blast it has taken).
+   */
+  destroyBuilding(building, buildingsList, policeManager, { chained = false, chainHits = null } = {}) {
     if (building.isDestroyed) return;
+    if (this.isScenery(building)) {
+      this.flattenScenery(building);
+      return;
+    }
     building.isDestroyed = true;
     building.hp = 0;
     if (building.mesh) {
       building.mesh.visible = false;
       // Leave remains behind: a small rubble pile that still blocks the buggy (see
-      // checkVehicleCollisions) without hiding the map. Removed by clearRubble().
-      if (!building.isMainGate && this.assetFactory && this.assetFactory.createRubble && !building.rubbleMesh) {
-        const fp = (building.footprint || (building.type === 'roadblock' || building.type === 'spike_trap' || building.type === 'tree' ? 1 : 2));
+      // checkVehicleCollisions) without hiding the map. Removed by clearRubble(). A drive-over
+      // trap was never an obstacle and leaves none: a spent mine's rubble pinned a buggy
+      // driving down a row of mines until the next one went off under it.
+      const def = BUILDING_DEFS[building.type];
+      const isTrap = !!(def && def.role === 'trap');
+      const fp = building.footprint || (def && def.footprint) || 2;
+      if (!building.isMainGate && !isTrap && this.assetFactory && this.assetFactory.createRubble && !building.rubbleMesh) {
         const rubble = this.assetFactory.createRubble(fp);
         rubble.position.copy(building.mesh.position);
         rubble.rotation.y = building.mesh.rotation.y;
         (building.mesh.parent || this.scene).add(rubble);
         building.rubbleMesh = rubble;
+      } else if (isTrap && def.trap && def.trap.oneShot && this.assetFactory && this.assetFactory.createCrater && !building.craterMesh) {
+        // A spent mine leaves a crater: a flat scorch mark with no collision (it is never put on
+        // rubbleMesh, which checkVehicleCollisions reads). Removed by clearRubble().
+        const crater = this.assetFactory.createCrater(fp);
+        crater.position.copy(building.mesh.position);
+        (building.mesh.parent || this.scene).add(crater);
+        building.craterMesh = crater;
       }
     }
 
-    if (!building.isMainGate && building.type !== 'tree') {
+    if (this.countsTowardDestruction(building)) {
       this.destroyedBuildingsCount++;
     }
 
+    if (!building.mesh) return;
     const pos = building.mesh.position;
-    const isPetrol = building.isExplosive;
 
-    // Award Loot
+    // Award loot (progression.lootFor). Trees carry none (they are scenery and do not count toward 100%, so
+    // paying for them made self-raiding a loot printer). A Crypto Vault adds everything
+    // sealed inside it - and only a destroyed vault pays; AttackManager empties it once the
+    // raid's loot is banked (BuildingManager.emptyCrackedVaults). Anything an explosive's blast
+    // razed or set off pays a share of its loot, so shooting open one pump is not a loot printer.
     const lvl = building.level || 1;
-    const loot = {
-      cash: Math.round((building.isExplosive ? 250 : 120) * lvl),
-      iron: Math.round(80 * lvl),
-      wood: Math.round(90 * lvl)
-    };
+    const loot = lootFor(building.type, lvl, { chained });
+    if (building.raidOnly && (building.stored || 0) >= 1 && !building.vaultCracked) {
+      const inside = producePayout(building.produceType, building.stored);
+      loot.cash += inside.cash;
+      loot.iron += inside.iron;
+      loot.wood += inside.wood;
+      building.vaultCracked = true;
+    }
     this.lootedResources.cash += loot.cash;
     this.lootedResources.iron += loot.iron;
     this.lootedResources.wood += loot.wood;
-    this.sound.playLoot();
+    if (loot.cash + loot.iron + loot.wood > 0) this.sound.playLoot();
 
-    if (isPetrol) {
-      // --- CHAIN REACTION EXPLOSION! ---
+    const blast = blastFor(building.type, lvl);
+    if (blast) {
+      // --- CHAIN REACTION: every explosive type uses its own catalog blast. ---
+      const blastRadius = blast.radius;
+      const blastDamage = blast.damage;
+
       this.spawnExplosion(pos.x, 2.0, pos.z, 'huge');
       this.sound.playExplosion('huge');
-
-      // Blast nearby buildings and police units!
-      const blastRadius = 16.0;
-      const blastDamage = 350;
 
       if (policeManager) {
         policeManager.damageAt(pos.x, pos.z, blastRadius, blastDamage);
       }
 
+      // The raider is caught in it too - that is the point of an explosive economy.
+      if (this.player && !this.player.isCrashed) {
+        const pd = Math.hypot(this.player.position.x - pos.x, this.player.position.z - pos.z);
+        const hurt = blastDamageAt(blast, pd);
+        // Contact: a chain reaction goes off in one frame, and only its first blast lands.
+        if (hurt > 0) this.player.takeDamage(hurt, { contact: true });
+      }
+
       if (buildingsList) {
+        // One chain reaction is one explosion, for the city as for the raider: a building caught
+        // in several of its blasts takes the hardest of them, not their sum. Summed, and at full
+        // strength to the rim, the blasts of one reactor shot open razed 40-86% of a full Town
+        // Hall 7-12 city.
+        const hits = chainHits || new Map();
         buildingsList.forEach(other => {
-          if (other !== building && !other.isDestroyed && other.mesh) {
-            const dist = pos.distanceTo(other.mesh.position);
-            if (dist <= blastRadius) {
-              this.damageBuilding(other, blastDamage, buildingsList, policeManager);
-            }
+          // A buried landmine (hidden mesh) is not there as far as a blast is concerned.
+          if (other === building || other.isDestroyed || !other.mesh || !other.mesh.visible) return;
+          const dist = pos.distanceTo(other.mesh.position);
+          if (dist > blastRadius) return;
+          // Another explosive in the radius goes off too, at any level and through any Citadel
+          // cover (progression.detonatesInBlast). Everything else takes the blast's falloff
+          // (progression.blastDamageAt), the same the raider and the Drop Bomb get.
+          if (detonatesInBlast(other.type)) {
+            this.destroyBuilding(other, buildingsList, policeManager, { chained: true, chainHits: hits });
+            return;
           }
+          const dmg = blastDamageAt(blast, dist);
+          const taken = hits.get(other) || 0;
+          if (dmg <= taken) return;
+          hits.set(other, dmg);
+          this.damageBuilding(other, dmg - taken, buildingsList, policeManager, { chained: true });
         });
       }
     } else {
@@ -231,6 +363,12 @@ export class DestructionEngine {
 
     const carPos = player.position;
     const speed = Math.abs(player.speed);
+    // Barriers on neighbouring tiles form one wall (BarrierWalls): each collides as its centre
+    // plus the half-sections to its standing neighbours, so a chain has no gaps to slip through.
+    const barrierIndex = standingBarrierIndex(buildings);
+    // One ram per frame, charged to the barrier the buggy is deepest into, so hitting the
+    // joint of two linked blocks is one ram rather than two.
+    let ram = null;
 
     for (let i = 0; i < buildings.length; i++) {
       const b = buildings[i];
@@ -291,6 +429,14 @@ export class DestructionEngine {
         dz = bz;
         dist = best;
         hitRadius = PILLAR_RADIUS;
+      } else if (isChainBarrier(b) && Math.abs(carPos.x - bPos.x) < 8 && Math.abs(carPos.z - bPos.z) < 8) {
+        // (Only near enough to touch a half-section - 3.9m diagonal + 3.2m reach - is it worth
+        // looking up the links.)
+        const p = closestWallPoint(b, barrierLinksOf(b, barrierIndex), carPos.x, carPos.z);
+        dx = carPos.x - p.x;
+        dz = carPos.z - p.z;
+        dist = p.dist;
+        hitRadius = 3.2;
       } else {
         dx = carPos.x - bPos.x;
         dz = carPos.z - bPos.z;
@@ -301,7 +447,23 @@ export class DestructionEngine {
       // Low barricades are meant to be SMASHED THROUGH (they carry their own hp: roadblock 300,
       // spike trap 200). Treating them as solid architecture pinned the buggy against a barrier
       // at 2 MPH indefinitely, with speed *= 0.45 reapplied every frame and no way past it.
-      const isRammable = (b.type === 'roadblock' || b.type === 'spike_trap');
+      const bDef = BUILDING_DEFS[b.type];
+
+      // Drive-over traps are not obstacles - TrapSystem handles them. Treating them as
+      // solid architecture would stop the buggy dead before it ever reached the trigger.
+      if (bDef && bDef.role === 'trap') continue;
+
+      // Trees are decoration: the buggy mows one down instead of stopping dead against it
+      // (a row of them used to be a near-free wall that could not even be rammed).
+      if (bDef && bDef.role === ROLE.SCENERY) {
+        if (dist < hitRadius && !player.isAirborne) {
+          this.flattenScenery(b);
+          player.camShake = Math.min(1.0, player.camShake + 0.1);
+        }
+        continue;
+      }
+
+      const isRammable = !!(bDef && bDef.barrier && bDef.barrier.rammable);
       if (isRammable && dist < hitRadius && !player.isAirborne) {
         // A barricade is a WALL: push the buggy back out along the contact normal every frame,
         // exactly like a building. (An earlier version only bled speed and never moved the car,
@@ -310,20 +472,7 @@ export class DestructionEngine {
         const nz = dist > 0.001 ? (dz / dist) : 1;
         player.position.x += nx * (hitRadius - dist);
         player.position.z += nz * (hitRadius - dist);
-
-        if (speed > 5.0) {
-          // Each impact chips the barrier (scaled by speed) once per contact window, then bounces
-          // the car off so it has to charge again. Breaking through takes repeated ramming,
-          // sustained cannon fire, or a jump over it.
-          const now = performance.now();
-          if (!b.lastRamAt || now - b.lastRamAt > 450) {
-            b.lastRamAt = now;
-            this.damageBuilding(b, Math.round(speed * 4), buildings, policeManager);
-            this.sound.playCrash(Math.min(0.7, speed / 28.0));
-            player.camShake = Math.min(1.0, player.camShake + 0.3);
-          }
-          player.speed *= 0.35;
-        }
+        if (!ram || dist < ram.dist) ram = { b, bDef, dist };
         continue;
       }
 
@@ -344,6 +493,26 @@ export class DestructionEngine {
           player.camShake = Math.min(1.0, player.camShake + 0.25);
         }
       }
+    }
+
+    if (ram && speed > 5.0) {
+      // Each impact chips the barrier (scaled by speed) once per contact window, then bounces
+      // the car off so it has to charge again. Breaking through takes repeated ramming,
+      // sustained cannon fire, or a jump over it.
+      const b = ram.b;
+      const bDef = ram.bDef;
+      const now = performance.now();
+      if (!b.lastRamAt || now - b.lastRamAt > 450) {
+        b.lastRamAt = now;
+        this.damageBuilding(b, Math.round(speed * 4), buildings, policeManager);
+        // Ramming hurts the raider too. Player-built barriers used to cost 0 HP while
+        // police-dropped ones cost 15 - the same collision, two different rules.
+        const ramHurt = bDef && bDef.barrier ? bDef.barrier.ramDamageToVehicle || 0 : 0;
+        if (ramHurt > 0) player.takeDamage(ramHurt, { contact: true });
+        this.sound.playCrash(Math.min(0.7, speed / 28.0));
+        player.camShake = Math.min(1.0, player.camShake + 0.3);
+      }
+      player.speed *= 0.35;
     }
   }
 

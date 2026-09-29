@@ -1,9 +1,20 @@
 import * as THREE from 'three';
+import { PURSUIT_UNITS, policeCapFor, pursuitUnitFor, spawnerUnitsFor } from '../data/progression.js';
 
 /**
  * PoliceManager - Spawns pursuit cruisers from police stations,
  * controls intercept AI, siren strobes, ramming, and roadblock drops.
+ *
+ * Pursuit units come from progression.pursuitUnitFor(): a spawner building's catalog entry
+ * names the PURSUIT_UNITS archetype it sends (police_station -> cruiser, swat_armory -> swat,
+ * drone_hangar -> drone) and adds per-level HP and speed (and a drone's strafe damage) on top.
+ *
+ * Contact rules:
+ *   cruiser / swat - contact is a BUST (the buggy is destroyed and a life is spent).
+ *   drone          - flies, so it cannot ram; it strafes for `strafeDamage` instead, and
+ *                    it keeps hitting an AIRBORNE buggy, which nothing else can.
  */
+
 export class PoliceManager {
   constructor(scene, assetFactory, soundManager, destructionEngine) {
     this.scene = scene;
@@ -28,40 +39,115 @@ export class PoliceManager {
     this.respawnDelay = 4.0;
   }
 
-  spawnFromStations(policeStations) {
-    this.stations = policeStations || [];
-    if (!policeStations || policeStations.length === 0) return;
-
-    policeStations.forEach(station => {
-      const pos = station.mesh.position;
-      this.spawnCruiser(pos.x + (Math.random() - 0.5) * 4, pos.z + (Math.random() - 0.5) * 4);
-    });
+  /**
+   * Deploy the city's pursuit force at raid start. `spawners` is every standing building
+   * whose role is 'spawner'; `townHallLevel` sets the city-wide unit cap.
+   */
+  spawnFromStations(spawners, townHallLevel = 1) {
+    this.stations = spawners || [];
+    this.maxPolice = policeCapFor(townHallLevel);
+    if (!spawners || spawners.length === 0) return;
+    this._deployOrder(spawners).forEach(station => this._spawnFrom(station));
   }
 
-  spawnCruiser(x, z) {
-    if (this.policeUnits.length >= this.maxPolice) return;
+  /**
+   * One entry per unit the spawners would send, ordered so the city-wide cap is shared
+   * fairly: spawner TYPES take turns (cruiser, SWAT, drone, cruiser, ...), and within a
+   * type every station sends its first unit before any sends its second. The ladder sizes
+   * policeCap to cover every allowed spawner, so this only matters for an over-built city -
+   * but there, filling the cap in build order starved whichever type was built last.
+   */
+  _deployOrder(spawners) {
+    const byType = new Map();
+    spawners.forEach(station => {
+      const per = spawnerUnitsFor(station.type) || 1;
+      if (!byType.has(station.type)) byType.set(station.type, []);
+      byType.get(station.type).push({ station, per });
+    });
+    const queues = [...byType.values()].map(list => {
+      const q = [];
+      const most = Math.max(...list.map(e => e.per));
+      for (let k = 0; k < most; k++) list.forEach(e => { if (k < e.per) q.push(e.station); });
+      return q;
+    });
+    const order = [];
+    for (let i = 0; queues.some(q => i < q.length); i++) {
+      queues.forEach(q => { if (i < q.length) order.push(q[i]); });
+    }
+    return order;
+  }
 
-    const mesh = this.assetFactory.createPoliceVehicle();
-    mesh.position.set(x, 0, z);
+  /** Spawn one unit of whatever `station` produces, scaled by the station's level. */
+  _spawnFrom(station) {
+    const spec = pursuitUnitFor(station.type, station.level || 1) || pursuitUnitFor('police_station', 1);
+    const pos = station.mesh.position;
+    return this.spawnUnit(
+      pos.x + (Math.random() - 0.5) * 4,
+      pos.z + (Math.random() - 0.5) * 4,
+      spec,
+      station
+    );
+  }
+
+  /** Put one unit on the map; `K` is a pursuitUnitFor() spec. Null once the cap is reached. */
+  spawnUnit(x, z, K, station = null) {
+    if (this.policeUnits.length >= this.maxPolice) return null;
+    const kind = K.kind;
+
+    const mesh = K.flying ? this._createDrone() : this.assetFactory.createPoliceVehicle();
+    mesh.scale.setScalar(K.scale);
+    mesh.position.set(x, K.flying ? K.altitude : 0, z);
     this.policeGroup.add(mesh);
 
+    const hp = K.hp;
     const unit = {
       id: `cop_${Date.now()}_${Math.random()}`,
+      kind,
+      flying: !!K.flying,
+      station,
       mesh,
       position: new THREE.Vector3(x, 0, z),
       heading: Math.random() * Math.PI * 2,
       speed: 0,
-      maxSpeed: 16.5 + Math.random() * 2.5, // Slower pursuit speed (~17 m/s vs player's 30 m/s)
-      acceleration: 8.5, // Gradual acceleration so player can outrun them
-      turnSpeed: 1.5, // Wider turning arc so player can dodge with sharp corners
-      hp: 320,
-      maxHp: 320,
+      maxSpeed: K.speedMin + Math.random() * (K.speedMax - K.speedMin),
+      acceleration: K.accel,
+      turnSpeed: K.turn,
+      hp,
+      maxHp: hp,
+      strafeDamage: K.strafeDamage || 0,   // drones only: per strafe, at the hangar's level
       ramCooldown: 0, // Prevents multi-frame damage melting
-      roadblockCooldown: 4.0 + Math.random() * 6.0,
+      roadblockCooldown: K.flying ? Infinity : 4.0 + Math.random() * 6.0,
       isDestroyed: false
     };
 
     this.policeUnits.push(unit);
+    return unit;
+  }
+
+  /** Small quadcopter built from the shared palette (no new materials). */
+  _createDrone() {
+    const M = this.assetFactory.materials;
+    const g = new THREE.Group();
+    g.name = 'pursuit_drone';
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.45, 1.4), M.ironDark);
+    body.castShadow = true;
+    g.add(body);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), M.neonRed);
+    eye.position.set(0, -0.18, 0.62);
+    g.add(eye);
+    const rotors = [];
+    for (const [ax, az] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 1.3), M.steel);
+      arm.position.set(ax * 0.55, 0.1, az * 0.55);
+      arm.rotation.y = Math.atan2(ax, az);
+      g.add(arm);
+      const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.04, 12), M.policeBlack);
+      rotor.position.set(ax * 1.0, 0.24, az * 1.0);
+      g.add(rotor);
+      rotors.push(rotor);
+    }
+    g.userData.rotors = rotors;
+    return g;
   }
 
   dropRoadblock(x, z, rotation) {
@@ -81,6 +167,28 @@ export class PoliceManager {
 
     this.roadblocks.push(roadblock);
     this.sound.playPlace();
+  }
+
+  /** Take `damage` off a police roadblock (Drop Bomb, Twin Missiles); it breaks at 0 HP. */
+  damageRoadblock(rb, damage) {
+    if (!rb || rb.isDestroyed) return;
+    rb.hp -= damage;
+    if (rb.hp <= 0) this.breakRoadblock(rb);
+  }
+
+  /**
+   * The one way a police roadblock leaves the map mid-raid: out of HP from a bomb, a missile or
+   * a ram. Safe inside a backwards loop over `roadblocks` (it splices only this block).
+   */
+  breakRoadblock(rb) {
+    if (!rb || rb.isDestroyed) return;
+    rb.isDestroyed = true;
+    this._discard(rb.mesh);
+    if (this.destruction) {
+      this.destruction.spawnExplosion(rb.position.x, 0.5, rb.position.z, 'small');
+    }
+    const idx = this.roadblocks.indexOf(rb);
+    if (idx !== -1) this.roadblocks.splice(idx, 1);
   }
 
   update(delta, elapsed, player) {
@@ -161,7 +269,22 @@ export class PoliceManager {
 
         // 4. Ramming Attack onto Player
         unit.ramCooldown = Math.max(0, (unit.ramCooldown || 0) - delta);
-        if (distToPlayer < 3.2 && !player.isAirborne) {
+        if (unit.flying) {
+          // Drones strafe from above. Horizontal distance only - and being airborne does
+          // not save the raider, which is the whole reason to build a Drone Hangar. A strafe
+          // is gunfire, not contact: it lands whatever else hit the buggy a moment ago. Its
+          // damage is the hangar's level (pursuitUnitFor), carried on the unit.
+          const K = PURSUIT_UNITS.drone;
+          const strafe = unit.strafeDamage || K.strafeDamage;
+          const hDist = Math.hypot(player.position.x - unit.position.x, player.position.z - unit.position.z);
+          if (hDist < K.strafeRange && unit.ramCooldown <= 0 && !player.isInvisible) {
+            player.takeDamageUnconditional
+              ? player.takeDamageUnconditional(strafe)
+              : player.takeDamage(strafe);
+            unit.ramCooldown = K.strafeInterval;
+            this.sound.playTurretFire && this.sound.playTurretFire();
+          }
+        } else if (distToPlayer < 3.2 && !player.isAirborne) {
           // Push apart strongly so vehicles bounce rather than sticking
           const push = unit.position.clone().sub(player.position).normalize();
           if (push.length() < 0.1) push.set(1, 0, 0);
@@ -203,8 +326,12 @@ export class PoliceManager {
       // 5. Update Position
       unit.position.x += Math.sin(unit.heading) * unit.speed * delta;
       unit.position.z += Math.cos(unit.heading) * unit.speed * delta;
-      unit.mesh.position.set(unit.position.x, 0, unit.position.z);
+      const alt = unit.flying ? PURSUIT_UNITS.drone.altitude + Math.sin(elapsed * 2.2 + i) * 0.35 : 0;
+      unit.mesh.position.set(unit.position.x, alt, unit.position.z);
       unit.mesh.rotation.y = unit.heading;
+      if (unit.mesh.userData.rotors) {
+        unit.mesh.userData.rotors.forEach(r => { r.rotation.y += delta * 40; });
+      }
 
       // Wheel rotation
       if (unit.mesh.userData.wheels) {
@@ -223,6 +350,8 @@ export class PoliceManager {
       if (uA.isDestroyed) continue;
 
       for (let j = i + 1; j < this.policeUnits.length; j++) {
+        if (this.policeUnits[i] && this.policeUnits[i].flying) break;
+        if (this.policeUnits[j] && this.policeUnits[j].flying) continue;
         const uB = this.policeUnits[j];
         if (uB.isDestroyed) continue;
 
@@ -283,7 +412,7 @@ export class PoliceManager {
     if (unit.isDestroyed) return;
     unit.isDestroyed = true;
     this.totalWrecked++;
-    this.policeGroup.remove(unit.mesh);
+    this._discard(unit.mesh);
 
     if (this.destruction) {
       this.destruction.spawnExplosion(unit.position.x, 1.0, unit.position.z, 'medium');
@@ -296,10 +425,14 @@ export class PoliceManager {
     }
 
     // Queue a replacement; whether it actually arrives depends on a station surviving.
-    this.respawnQueue.push({ t: this.respawnDelay });
+    this.respawnQueue.push({ t: this.respawnDelay, type: unit.station ? unit.station.type : null });
   }
 
-  /** Tick reinforcement timers; spawn from a random surviving station. */
+  /**
+   * Tick reinforcement timers. A wrecked unit is replaced by the same kind from a surviving
+   * spawner of the same type (a lost drone comes back as a drone); if every one of those is
+   * razed, any surviving spawner sends backup instead.
+   */
   _updateRespawns(delta) {
     if (this.respawnQueue.length === 0) return;
     const live = this.stations.filter(st => st && st.mesh && !st.isDestroyed);
@@ -310,9 +443,10 @@ export class PoliceManager {
       this.respawnQueue.splice(i, 1);
       if (live.length === 0) continue;                 // no station left to send backup
       if (this.policeUnits.length >= this.maxPolice) continue;
-      const st = live[Math.floor(Math.random() * live.length)];
-      const pos = st.mesh.position;
-      this.spawnCruiser(pos.x + (Math.random() - 0.5) * 4, pos.z + (Math.random() - 0.5) * 4);
+      const same = live.filter(st => st.type === q.type);
+      const pool = same.length ? same : live;
+      const st = pool[Math.floor(Math.random() * pool.length)];
+      this._spawnFrom(st);
       this.sound.playPlace();
     }
   }
@@ -338,17 +472,7 @@ export class PoliceManager {
       const rb = this.roadblocks[i];
       if (rb.isDestroyed) continue;
       const rPos = new THREE.Vector2(rb.position.x, rb.position.z);
-      if (center.distanceTo(rPos) <= radius) {
-        rb.hp -= damage;
-        if (rb.hp <= 0) {
-          rb.isDestroyed = true;
-          this.policeGroup.remove(rb.mesh);
-          if (this.destruction) {
-            this.destruction.spawnExplosion(rb.position.x, 0.5, rb.position.z, 'small');
-          }
-          this.roadblocks.splice(i, 1);
-        }
-      }
+      if (center.distanceTo(rPos) <= radius) this.damageRoadblock(rb, damage);
     }
   }
 
@@ -378,31 +502,34 @@ export class PoliceManager {
         if (now - rb.lastRamAt > 450) {
           rb.lastRamAt = now;
           rb.hp -= Math.round(speed * 4);
-          player.takeDamage(15);
+          player.takeDamage(15, { contact: true });
           this.sound.playCrash(Math.min(0.7, speed / 28.0));
         }
         player.speed *= 0.35; // bounce off and charge again
 
-        if (rb.hp <= 0) {
-          rb.isDestroyed = true;
-          this.policeGroup.remove(rb.mesh);
-          if (this.destruction) {
-            this.destruction.spawnExplosion(rb.position.x, 0.5, rb.position.z, 'small');
-          }
-          this.roadblocks.splice(i, 1);
-        }
+        if (rb.hp <= 0) this.breakRoadblock(rb);
       }
     }
   }
 
+  /**
+   * Take a unit or police roadblock off the map for good and free its geometry (every one is
+   * built fresh; its materials are the shared palette, so they stay). Removing them alone
+   * leaked some 30 geometries a raid.
+   */
+  _discard(mesh) {
+    this.policeGroup.remove(mesh);
+    mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  }
+
   clear() {
     this.policeUnits.forEach(u => {
-      this.policeGroup.remove(u.mesh);
+      if (!u.isDestroyed) this._discard(u.mesh);
     });
     this.policeUnits = [];
 
     this.roadblocks.forEach(r => {
-      this.policeGroup.remove(r.mesh);
+      if (!r.isDestroyed) this._discard(r.mesh);
     });
     this.roadblocks = [];
     this.respawnQueue = [];

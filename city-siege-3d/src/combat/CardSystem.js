@@ -1,4 +1,33 @@
 import * as THREE from 'three';
+import { RAIDER_BASE, CARD_RECHARGES_AFTER_EFFECT, CARD_BASE, blastDamageAt, IN_WORLD_PICKUP, pickupLockoutFor } from '../data/progression.js';
+
+/** The small mechanical hop (progression RAIDER_BASE.hop): boost, lift and its own recharge. */
+const HOP = RAIDER_BASE.hop;
+
+/**
+ * Level-1 numbers for every ability card live in progression.js (CARD_BASE, the first row of
+ * CARD_TIERS). The Vehicle Garage (GarageManager.computeCardStats -> progression.cardStatsFor)
+ * hands back absolute per-level values, so applyLoadout() never compounds. Re-exported for
+ * older tooling.
+ */
+export { CARD_BASE };
+
+/**
+ * HUD tooltip for a card at the numbers it will actually play (applyLoadout copies them from
+ * progression.cardStatsFor), so an L5 cloak never reads as the level-1 five seconds.
+ */
+function cardDesc(c) {
+  switch (c.id) {
+    case 'invisibility': return `Cloak vehicle for ${c.duration}s (recharges in ${c.cooldown}s). Police & turrets lose lock-on.`;
+    // It promises cruisers, not every pursuer: a Town Hall-tuned bomb wrecks every cruiser, but a
+    // SWAT truck of the same level outlasts it at Town Halls 3-4 and 9-12 (1804 dmg vs 1920 HP at 12).
+    case 'bomb': return `Eject a heavy explosive behind the vehicle (${c.blastRadius}m, ${c.blastDamage} dmg): wrecks cruisers at its own level or below, blasts police roadblocks, badly hurts SWAT.`;
+    case 'missiles': return `Fire twin forward rockets (${c.damage} dmg each) that blast roadblocks & cruisers.`;
+    case 'jump': return 'Hydraulic booster launches vehicle high over roadblocks & police. Recharges once you land.';
+    case 'nitro': return `Supercharge speed and ramming power for ${c.duration}s (recharges in ${c.cooldown}s).`;
+    default: return '';
+  }
+}
 
 /**
  * CardSystem - Manages player battle action cards:
@@ -18,11 +47,11 @@ export class CardSystem {
         icon: '👻',
         key: '1',
         hotkey: '1',
-        cooldown: 14.0,
+        level: 1,
+        cooldown: CARD_BASE.invisibility.cooldown,
         currentCooldown: 0,
-        duration: 5.0,
-        activeTimer: 0,
-        desc: 'Cloak vehicle for 5s. Police & turrets lose lock-on.'
+        duration: CARD_BASE.invisibility.duration,
+        activeTimer: 0
       },
       {
         id: 'bomb',
@@ -30,9 +59,11 @@ export class CardSystem {
         icon: '💣',
         key: '2',
         hotkey: '2',
-        cooldown: 7.0,
+        level: 1,
+        cooldown: CARD_BASE.bomb.cooldown,
         currentCooldown: 0,
-        desc: 'Eject heavy explosive behind vehicle to wipe pursuers.'
+        blastRadius: CARD_BASE.bomb.blastRadius,
+        blastDamage: CARD_BASE.bomb.blastDamage
       },
       {
         id: 'missiles',
@@ -40,9 +71,10 @@ export class CardSystem {
         icon: '🚀',
         key: '3',
         hotkey: '3',
-        cooldown: 6.0,
+        level: 1,
+        cooldown: CARD_BASE.missiles.cooldown,
         currentCooldown: 0,
-        desc: 'Fire twin forward rockets that blast roadblocks & cruisers.'
+        damage: CARD_BASE.missiles.damage
       },
       {
         id: 'jump',
@@ -50,9 +82,9 @@ export class CardSystem {
         icon: '🦘',
         key: 'SPACE / 4',
         hotkey: '4',
-        cooldown: 3.5, // Fast 3.5s cooldown for thrilling leaps!
-        currentCooldown: 0,
-        desc: 'Hydraulic booster launches vehicle high over roadblocks & police.'
+        level: 1,
+        cooldown: CARD_BASE.jump.cooldown, // recharges on the ground only (CARD_RECHARGES_AFTER_EFFECT)
+        currentCooldown: 0
       },
       {
         id: 'nitro',
@@ -60,13 +92,18 @@ export class CardSystem {
         icon: '🔥',
         key: '5',
         hotkey: '5',
-        cooldown: 9.0,
+        level: 1,
+        cooldown: CARD_BASE.nitro.cooldown,
         currentCooldown: 0,
-        duration: 3.5,
-        activeTimer: 0,
-        desc: 'Supercharge speed and ramming power for 3.5 seconds.'
+        duration: CARD_BASE.nitro.duration,
+        activeTimer: 0
       }
     ];
+    this.cards.forEach(c => { c.desc = cardDesc(c); });
+
+    // Ordered ACTIVE cards for the current raid (set by applyLoadout from the Vehicle Garage).
+    // Hotkeys, the HUD and activateCard() consult only this; `cards` stays the full catalogue.
+    this.deck = [];
 
     // Active in-world projectiles / dropped items
     this.droppedBombs = [];
@@ -75,6 +112,10 @@ export class CardSystem {
     this.cardObjectsGroup = new THREE.Group();
     this.cardObjectsGroup.name = 'card_abilities_group';
     this.scene.add(this.cardObjectsGroup);
+
+    // Seconds of GROUND time before the next hop. Every take-off from Space (hop or Big Jump)
+    // re-arms it, so hops cannot be chained onto each other or onto a Big Jump.
+    this.hopCooldown = 0;
 
     this.onCooldownUpdate = null;
     this.onCardCollected = null;
@@ -85,8 +126,8 @@ export class CardSystem {
     window.addEventListener('keydown', (e) => {
       if (e.target.closest('input, textarea')) return;
 
-      // Check hotkeys 1-5
-      const card = this.cards.find(c => c.hotkey === e.key || c.key === e.key);
+      // Hotkeys are assigned by deck slot (1..N) in applyLoadout
+      const card = this.deck.find(c => c.hotkey === e.key);
       if (card && this.playerRef && !this.playerRef.isCrashed) {
         this.activateCard(card.id);
       }
@@ -109,34 +150,74 @@ export class CardSystem {
     }
   }
 
+  /**
+   * Apply the Vehicle Garage loadout for this raid. `stats[id]` holds ABSOLUTE per-level
+   * numbers (cooldown / duration / blastRadius / blastDamage / damage / level); `ids` is the
+   * ordered deck. Idempotent: calling it twice yields the same deck and the same numbers.
+   */
+  applyLoadout(ids = [], stats = {}) {
+    this.cards.forEach(c => {
+      Object.assign(c, stats[c.id] || {});
+      c.desc = cardDesc(c);
+      c.currentCooldown = 0;
+      c.activeTimer = 0;
+      c.hotkey = null;
+      c.key = '';
+    });
+    this.deck = ids.map(id => this.cards.find(c => c.id === id)).filter(Boolean);
+    this.deck.forEach((c, i) => {
+      c.hotkey = String(i + 1);
+      c.key = c.id === 'jump' ? `SPACE / ${i + 1}` : String(i + 1);
+    });
+    if (this.onCooldownUpdate) this.onCooldownUpdate(this.cards);
+  }
+
   canUse(cardId) {
     const card = this.cards.find(c => c.id === cardId);
-    return card && card.currentCooldown <= 0 && this.playerRef && !this.playerRef.isCrashed;
+    return !!card && this.deck.includes(card) && card.currentCooldown <= 0 && !!this.playerRef && !this.playerRef.isCrashed;
   }
 
   activateCard(cardId) {
     const card = this.cards.find(c => c.id === cardId);
     if (!card || !this.playerRef || this.playerRef.isCrashed) return false;
 
+    // Cards outside the raid deck are inert everywhere (keyboard, HUD, touch). An unequipped
+    // Big Jump degrades to the small hydraulic hop so roadblocks can never soft-lock the run.
+    if (!this.deck.includes(card)) {
+      if (card.id === 'jump') this._tryHop();
+      return false;
+    }
+
     // If Jump is on cooldown but player presses Space/Jump, provide mini hydraulic hop
     if (card.id === 'jump' && card.currentCooldown > 0) {
-      if (!this.playerRef.isAirborne) {
-        this.playerRef.triggerBigJump(-4.0, 16.5);
-      }
+      this._tryHop();
       return false;
     }
 
     if (card.currentCooldown > 0) return false;
 
+    // EMP Disrupter field: ability electronics are locked out. The plain hydraulic hop is
+    // mechanical and still works, so an EMP can never soft-lock the buggy behind a barrier.
+    if (this.playerRef.isSilenced) {
+      if (card.id === 'jump') this._tryHop();
+      if (this.onSilenced) this.onSilenced(card);
+      return false;
+    }
+
+    // Big Jump needs the wheels on the ground, like the hop. (Pressed mid-air it used to burn
+    // its cooldown for nothing, because triggerBigJump ignores an airborne buggy.)
+    if (card.id === 'jump' && this.playerRef.isAirborne) return false;
+
     if (card.id === 'invisibility') {
       card.activeTimer = card.duration;
       this.playerRef.setInvisibility(true);
     } else if (card.id === 'bomb') {
-      this._spawnBomb();
+      this._spawnBomb(card);
     } else if (card.id === 'missiles') {
-      this._fireMissiles();
+      this._fireMissiles(card);
     } else if (card.id === 'jump') {
-      this.playerRef.triggerBigJump(14.0, 25.0);
+      this.playerRef.triggerBigJump();   // height comes from the vehicle's jump track
+      this.hopCooldown = Math.max(this.hopCooldown, HOP.cooldown);
     } else if (card.id === 'nitro') {
       card.activeTimer = card.duration;
       this.playerRef.setNitro(true);
@@ -150,7 +231,47 @@ export class CardSystem {
     return true;
   }
 
-  _spawnBomb() {
+  /**
+   * The small mechanical hop Space falls back to (Big Jump benched, recharging or jammed).
+   * It recharges only on the ground (update()), so holding Space - OS key repeat fires this
+   * ~30 times a second - lifts the buggy at most RAIDER_BASE.hop.maxAirShare of the time.
+   */
+  _tryHop() {
+    const p = this.playerRef;
+    if (!p || p.isCrashed || p.isAirborne || this.hopCooldown > 0) return false;
+    p.triggerBigJump(HOP.boostSpeed, HOP.boostY);
+    this.hopCooldown = HOP.cooldown;
+    return true;
+  }
+
+  /**
+   * EMP field: switch off every timed effect that is already running (cloak, nitro burn).
+   * Returns the names of what was cut so the HUD can say so. Safe to call every frame.
+   */
+  jamActiveEffects() {
+    const cut = [];
+    if (!this.playerRef) return cut;
+    this.cards.forEach(card => {
+      if (!(card.activeTimer > 0)) return;
+      card.activeTimer = 0;
+      if (card.id === 'invisibility') this.playerRef.setInvisibility(false);
+      else if (card.id === 'nitro') this.playerRef.setNitro(false);
+      cut.push(card.name);
+    });
+    // Belt and braces: clear the flags themselves too, whatever set them.
+    if (this.playerRef.isInvisible) {
+      this.playerRef.setInvisibility(false);
+      if (!cut.includes('Invisibility')) cut.push('Invisibility');
+    }
+    if (this.playerRef.isNitro) {
+      this.playerRef.setNitro(false);
+      if (!cut.includes('Nitro Surge')) cut.push('Nitro Surge');
+    }
+    if (cut.length && this.onCooldownUpdate) this.onCooldownUpdate(this.cards);
+    return cut;
+  }
+
+  _spawnBomb(card = this.cards.find(c => c.id === 'bomb')) {
     const p = this.playerRef;
     const forward = new THREE.Vector3(Math.sin(p.heading), 0, Math.cos(p.heading));
     const spawnPos = p.position.clone().sub(forward.multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.4, 0));
@@ -172,13 +293,16 @@ export class CardSystem {
       mesh: bombMesh,
       pos: spawnPos,
       timer: 1.5,
-      flash: 0
+      flash: 0,
+      // Copied onto the record so a bomb already in the air keeps its numbers.
+      radius: (card && card.blastRadius) || CARD_BASE.bomb.blastRadius,
+      damage: (card && card.blastDamage) || CARD_BASE.bomb.blastDamage
     });
 
     this.sound.playBombDrop();
   }
 
-  _fireMissiles() {
+  _fireMissiles(card = this.cards.find(c => c.id === 'missiles')) {
     const p = this.playerRef;
     const forward = new THREE.Vector3(Math.sin(p.heading), 0, Math.cos(p.heading));
     const right = new THREE.Vector3(Math.cos(p.heading), 0, -Math.sin(p.heading));
@@ -205,7 +329,8 @@ export class CardSystem {
       this.activeMissiles.push({
         mesh: rocket,
         velocity: forward.clone().multiplyScalar(48.0),
-        life: 2.2
+        life: 2.2,
+        damage: (card && card.damage) || CARD_BASE.missiles.damage
       });
     });
 
@@ -213,10 +338,13 @@ export class CardSystem {
   }
 
   update(delta, elapsed) {
-    // 1. Update Card Cooldowns & Active Timers
+    // 1. Update Card Cooldowns & Active Timers. The jump hydraulics (hop and Big Jump alike)
+    // only recharge with the wheels down, so a jump's hang time never counts as recharge.
     let stateChanged = false;
+    const grounded = !(this.playerRef && this.playerRef.isAirborne);
+    if (this.hopCooldown > 0 && grounded) this.hopCooldown = Math.max(0, this.hopCooldown - delta);
     this.cards.forEach(card => {
-      if (card.currentCooldown > 0) {
+      if (card.currentCooldown > 0 && (grounded || !CARD_RECHARGES_AFTER_EFFECT[card.id])) {
         card.currentCooldown = Math.max(0, card.currentCooldown - delta);
         stateChanged = true;
       }
@@ -247,26 +375,28 @@ export class CardSystem {
       if (bomb.timer <= 0) {
         // DETONATE!
         const bPos = bomb.pos;
-        this.cardObjectsGroup.remove(bomb.mesh);
+        this._discard(bomb.mesh);
         this.droppedBombs.splice(i, 1);
 
         this.destruction.spawnExplosion(bPos.x, 1.2, bPos.z, 'huge');
         this.sound.playExplosion('huge');
 
-        const blastRadius = 14.0;
-        const blastDamage = 350;
+        const blastRadius = bomb.radius;
+        const blastDamage = bomb.damage;
 
-        // Damage police and roadblocks
+        // Damage police and roadblocks at full strength (no falloff): it is built for pursuers.
         this.police.damageAt(bPos.x, bPos.z, blastRadius, blastDamage);
 
-        // Damage buildings
+        // Damage buildings (a buried landmine is invisible to the blast until it fires). They
+        // take the same falloff every other blast deals (progression.blastDamageAt): full at
+        // the centre, BLAST_FALLOFF_FLOOR at the rim. At full strength to the rim one bomb out-
+        // damaged the autocannon 60-fold at Town Hall 12 (see progression.bombDpsAt).
         if (this.buildingsList) {
+          const blast = { radius: blastRadius, damage: blastDamage };
           this.buildingsList.forEach(b => {
-            if (!b.isDestroyed && b.mesh) {
-              const dist = bPos.distanceTo(b.mesh.position);
-              if (dist <= blastRadius) {
-                this.destruction.damageBuilding(b, blastDamage, this.buildingsList, this.police);
-              }
+            if (!b.isDestroyed && b.mesh && b.mesh.visible) {
+              const dmg = blastDamageAt(blast, Math.hypot(bPos.x - b.mesh.position.x, bPos.z - b.mesh.position.z));
+              if (dmg > 0) this.destruction.damageBuilding(b, dmg, this.buildingsList, this.police);
             }
           });
         }
@@ -291,11 +421,23 @@ export class CardSystem {
         }
       }
 
-      // Check collision with Buildings
+      // The roadblocks cruisers drop in a chase (a built Roadblock Barrier is a building, below).
+      // Horizontal distance: the rocket flies at 1.4 m, the block sits on the road.
+      if (!exploded) {
+        for (const rb of this.police.roadblocks) {
+          if (!rb.isDestroyed && Math.hypot(mPos.x - rb.position.x, mPos.z - rb.position.z) < rb.radius + 0.5) {
+            this.police.damageRoadblock(rb, m.damage);
+            exploded = true;
+            break;
+          }
+        }
+      }
+
+      // Check collision with Buildings (missiles fly straight over drive-over traps and past trees)
       if (!exploded && this.buildingsList) {
         for (let b of this.buildingsList) {
-          if (!b.isDestroyed && b.mesh && mPos.distanceTo(b.mesh.position) < 3.2) {
-            this.destruction.damageBuilding(b, 300, this.buildingsList, this.police);
+          if (this.destruction.isShootable(b) && mPos.distanceTo(b.mesh.position) < 3.2) {
+            this.destruction.damageBuilding(b, m.damage, this.buildingsList, this.police);
             exploded = true;
             break;
           }
@@ -303,7 +445,7 @@ export class CardSystem {
       }
 
       if (exploded || m.life <= 0) {
-        this.cardObjectsGroup.remove(m.mesh);
+        this._discard(m.mesh);
         this.activeMissiles.splice(i, 1);
         if (exploded) {
           this.destruction.spawnExplosion(mPos.x, mPos.y, mPos.z, 'medium');
@@ -322,9 +464,14 @@ export class CardSystem {
           card.mesh.rotation.y += delta * 2.2;
           card.mesh.position.y = 1.3 + Math.sin(elapsed * 3.5 + card.phase) * 0.35;
 
-          // Check vehicle pickup distance
+          // Check vehicle pickup distance. Inside an EMP field the ability pickups stay put
+          // (they would otherwise hand back the nitro / jump / missiles the field jams), and a
+          // NITRO / MEGA JUMP pickup waits, shrunk, while its card is recharging.
           const dist = pPos.distanceTo(card.mesh.position);
-          if (dist < 3.0) {
+          const jammed = this.playerRef.isSilenced && card.type !== 'shield';
+          const ready = this._pickupReady(card.type);
+          card.mesh.scale.setScalar(ready ? 1 : 0.6);
+          if (dist < 3.0 && !jammed && ready) {
             this._collectInWorldCard(card);
           }
         } else {
@@ -338,10 +485,23 @@ export class CardSystem {
     }
   }
 
+  /**
+   * A NITRO or MEGA JUMP pickup is a free use of that card (progression.IN_WORLD_PICKUP), so it
+   * is only taken while the card is ready: its burn or hang time then counts against the same
+   * CARD_UPTIME_CAP as the card's own. (A Big Jump cannot launch an airborne buggy.)
+   */
+  _pickupReady(type) {
+    if (type !== 'nitro' && type !== 'jump') return true;
+    const c = this.cards.find(x => x.id === type);
+    if (!c) return true;
+    if (c.currentCooldown > 0 || c.activeTimer > 0) return false;
+    return type !== 'jump' || !(this.playerRef && this.playerRef.isAirborne);
+  }
+
   _collectInWorldCard(card) {
     card.active = false;
     card.mesh.visible = false;
-    card.respawnTimer = 14.0; // Respawns in 14 seconds!
+    card.respawnTimer = IN_WORLD_PICKUP.respawn;
 
     this.sound.playUpgrade();
     if (this.destruction) {
@@ -349,10 +509,12 @@ export class CardSystem {
     }
 
     if (card.type === 'jump') {
-      // Mega Jump Launch!
-      this.playerRef.triggerBigJump(16.0, 27.0);
+      // Mega Jump Launch! It leaves the Big Jump recharging (on the ground) as a use would.
+      const mega = IN_WORLD_PICKUP.megaJump;
+      this.playerRef.triggerBigJump(mega.boostSpeed, mega.boostY);
+      this.hopCooldown = Math.max(this.hopCooldown, HOP.cooldown);
       const jc = this.cards.find(c => c.id === 'jump');
-      if (jc) jc.currentCooldown = 0;
+      if (jc) jc.currentCooldown = Math.max(jc.currentCooldown, pickupLockoutFor('jump'));
       if (this.onCardCollected) {
         this.onCardCollected({
           title: '🦘 MEGA JUMP CARD COLLECTED!',
@@ -360,16 +522,17 @@ export class CardSystem {
         });
       }
     } else if (card.type === 'nitro') {
+      // A free burn that leaves the Nitro Surge card recharging, never a reset of it.
       this.playerRef.setNitro(true);
       const nc = this.cards.find(c => c.id === 'nitro');
       if (nc) {
-        nc.activeTimer = 4.5;
-        nc.currentCooldown = 0;
+        nc.activeTimer = IN_WORLD_PICKUP.nitroBurn;
+        nc.currentCooldown = Math.max(nc.currentCooldown, pickupLockoutFor('nitro'));
       }
       if (this.onCardCollected) {
         this.onCardCollected({
           title: '🔥 NITRO SURGE CARD COLLECTED!',
-          desc: 'Supercharged 4.5s turbo speed & ramming boost!'
+          desc: `Supercharged ${IN_WORLD_PICKUP.nitroBurn}s turbo speed & ramming boost!`
         });
       }
     } else if (card.type === 'missiles') {
@@ -389,7 +552,7 @@ export class CardSystem {
       if (this.onCardCollected) {
         this.onCardCollected({
           title: '💣 CLUSTER BOMB CARD COLLECTED!',
-          desc: 'Heavy explosive ejected behind to wipe pursuers!'
+          desc: 'Heavy explosive ejected behind to wreck cruisers at its own level or below!'
         });
       }
     } else if (card.type === 'shield') {
@@ -557,10 +720,24 @@ export class CardSystem {
   }
 
   clearInWorldCards() {
-    this.inWorldCards.forEach(c => {
-      this.cardObjectsGroup.remove(c.mesh);
-    });
+    this.inWorldCards.forEach(c => this._discard(c.mesh));
     this.inWorldCards = [];
+  }
+
+  /**
+   * Take a bomb, rocket or pickup off the map for good and free what it holds on the GPU:
+   * each one builds its own geometry, materials and (pickups) canvas texture, and removing them
+   * alone leaked them every raid.
+   */
+  _discard(mesh) {
+    this.cardObjectsGroup.remove(mesh);
+    mesh.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
   }
 
   reset() {
@@ -577,9 +754,11 @@ export class CardSystem {
       c.currentCooldown = 0;
       c.activeTimer = 0;
     });
-    this.droppedBombs.forEach(b => this.cardObjectsGroup.remove(b.mesh));
+    this.hopCooldown = 0;
+    this.deck = [];
+    this.droppedBombs.forEach(b => this._discard(b.mesh));
     this.droppedBombs = [];
-    this.activeMissiles.forEach(m => this.cardObjectsGroup.remove(m.mesh));
+    this.activeMissiles.forEach(m => this._discard(m.mesh));
     this.activeMissiles = [];
     this.clearInWorldCards();
     if (this.onCooldownUpdate) {

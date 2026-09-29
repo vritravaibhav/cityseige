@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BUILDING_DEFS, RAID_KIND_SHARE, auraRadiusFor, raidDefenseFor, raidGemsFor, townHallRow } from '../data/progression.js';
 
 /**
  * AttackManager - Coordinates pre-attack reconnaissance, direct 3D map gate tapping,
@@ -16,7 +17,9 @@ export class AttackManager {
     economyManager,
     soundManager,
     uiManager,
-    assetFactory
+    assetFactory,
+    garageManager,
+    trapSystem
   }) {
     this.scene = sceneManager;
     this.buildings = buildingManager;
@@ -29,6 +32,8 @@ export class AttackManager {
     this.sound = soundManager;
     this.ui = uiManager;
     this.assetFactory = assetFactory;
+    this.garage = garageManager;
+    this.traps = trapSystem || null;
 
     this.state = 'IDLE'; // 'IDLE' | 'RECON' | 'SWOOP' | 'COMBAT' | 'RESULT'
     this.selectedGate = null;
@@ -121,6 +126,8 @@ export class AttackManager {
     this.sound.ensureStarted();
     this.scene.setCameraMode('recon');
     this.buildings.setCollectiblesVisible(false);   // no floating collect markers during the attack
+    // Landmines are buried from the moment the raider looks at the map, not from the breach.
+    if (this.traps) this.traps.bury(this.buildings.buildings);
 
     // Fit all gates on screen with padding before the player is asked to pick one.
     this.scene.frameReconOnTargets(
@@ -131,9 +138,7 @@ export class AttackManager {
     this.vehicle.mesh.visible = false;
 
     // Clear old beacons
-    while (this.beaconsGroup.children.length > 0) {
-      this.beaconsGroup.remove(this.beaconsGroup.children[0]);
-    }
+    this.clearBeacons();
 
     // Spawn 3D Holographic Beacons over each Main Gate
     const mainGates = this.buildings.getMainGates();
@@ -153,6 +158,7 @@ export class AttackManager {
 
   abortRecon() {
     this.buildings.setCollectiblesVisible(true);
+    if (this.traps) this.traps.unbury(this.buildings.buildings);
     this.clearBeacons();
     this.state = 'IDLE';
     this.ui.hideTargetBuildingHealth();
@@ -182,6 +188,9 @@ export class AttackManager {
     const heading = Math.atan2(-outwardDir.x, -outwardDir.z);
 
     this.breachSpawn = { x: spawnX, z: spawnZ, heading };
+    // Buggy tuning from the Vehicle Garage is applied as absolute values right BEFORE spawnAt,
+    // because spawnAt copies maxHp/maxShield into hp/shield. respawnAfterBust() re-uses them.
+    if (this.garage) this.vehicle.applyUpgrades(this.garage.computeVehicleStats());
     this.vehicle.spawnAt(spawnX, spawnZ, heading);
     this.vehicle.mesh.visible = true;
     // Police converge on the breach gate almost immediately; give the player a moment to move
@@ -212,6 +221,11 @@ export class AttackManager {
     // 1. Reset destruction tracker & cards
     this.destruction.onBuildingDamaged = (b, hp) => this.ui.showTargetBuildingHealth(b, hp);
     this.destruction.reset(this.buildings.buildings);
+    // The defense this raid has to beat, kind by kind (every gun, pursuit base, trap and aura
+    // type the Town Hall allows, weighted by level against the Town Hall) - the gem bounty scales
+    // with it, so a city with its guns, EMPs, Citadel or traps stowed is paid less.
+    this.raidDefense = raidDefenseFor(this.buildings.buildings, this.buildings.getTownHallLevel());
+    this.raidThreat = this.raidDefense.covered;
 
     // Three lives per raid, plus any spares stocked at the Vehicle Tuning Lab.
     this.baseLives = 3;
@@ -223,10 +237,15 @@ export class AttackManager {
     // Exit button: retreat with whatever has been looted so far.
     this.ui.onRetreat = () => { if (this.state === 'COMBAT') this.endAttack('retreat'); };
     this.vehicle.onDamaged = (amount) => this.ui.flashDamage(amount);
+    // No autocannon shell from an earlier raid may land in this one.
+    this.vehicle.clearProjectiles();
     this.cards.reset();
     this.cards.setPlayer(this.vehicle, this.buildings.buildings);
-    // Ability cards are earned and upgraded in the card training screen and used from the deck
-    // while driving - no pickup cards scattered across the roads.
+    // Deck, card levels and buggy tuning come from the Vehicle Garage (GarageManager).
+    if (this.garage) {
+      this.cards.applyLoadout(this.garage.getLoadout(), this.garage.computeCardStats());
+    }
+    this.ui.renderCardsDeck(this.cards.deck, (id) => this.cards.activateCard(id));
 
     // 2. Register Gate Turrets
     this.turrets.clear();
@@ -235,10 +254,39 @@ export class AttackManager {
     // Must come AFTER registerGates(), which resets the turret list.
     this.turrets.registerDefenses(this.buildings.buildings);
 
-    // 3. Spawn police cruisers from active police stations
+    // 3. Pursuit force: every spawner (Police Station, SWAT Armory, Drone Hangar), capped
+    // by the Town Hall's police limit.
     this.police.clear();
     const stations = this.buildings.getPoliceStations();
-    this.police.spawnFromStations(stations);
+    this.police.spawnFromStations(stations, this.buildings.getTownHallLevel());
+
+    // 3b. Drive-over traps. Must run after destruction.reset(), which un-hides every mesh -
+    // registration re-buries the landmines.
+    if (this.traps) {
+      this.traps.register(this.buildings.buildings);
+      this.traps.onTrapTriggered = (b, kind) => {
+        const label = { damage: 'LANDMINE!', launch: 'SPRING TRAP!', freeze: 'FROZEN!', pull: 'VORTEX!' }[kind];
+        if (label && this.ui.showToast) this.ui.showToast(`\u{26A0}\u{FE0F} ${label}`);
+      };
+    }
+
+    // 3c. Explosive buildings (petrol, refinery, reactor, collider) hurt the buggy too.
+    this.destruction.player = this.vehicle;
+
+    // 3d. EMP Disrupters silence ability cards inside their radius (which grows per level -
+    // progression.auraRadiusFor; the old inline formula read a field EMP does not have and
+    // produced a NaN radius, so no field ever silenced anything).
+    this.empFields = this.buildings.buildings
+      .filter(b => BUILDING_DEFS[b.type] && BUILDING_DEFS[b.type].aura && BUILDING_DEFS[b.type].aura.kind === 'silence')
+      .map(b => ({ b, radius: auraRadiusFor(b.type, b.level || 1) }));
+    this.vehicle.isSilenced = false;
+    this.cards.onSilenced = (card) => {
+      const now = performance.now();
+      if (!this._lastSilenceToast || now - this._lastSilenceToast > 1500) {
+        this._lastSilenceToast = now;
+        if (this.ui.showToast) this.ui.showToast('\u{1F4E1} EMP FIELD - ability cards jammed!');
+      }
+    };
 
     this.scene.setCameraMode('combat');
     this.vehicle.speed = 22.0; // Ramming breach speed!
@@ -256,9 +304,22 @@ export class AttackManager {
     }
   }
 
+  /**
+   * Remove the gate beacons and free what they hold on the GPU. createGateBeacon builds its
+   * geometry, materials and name-banner texture fresh for every recon; only removing them
+   * leaked 3 textures and a dozen geometries a raid.
+   */
   clearBeacons() {
     while (this.beaconsGroup.children.length > 0) {
-      this.beaconsGroup.remove(this.beaconsGroup.children[0]);
+      const beacon = this.beaconsGroup.children[0];
+      this.beaconsGroup.remove(beacon);
+      beacon.traverse(o => {
+        if (o.geometry && !o.isSprite) o.geometry.dispose();   // every Sprite shares one quad
+        if (o.material) {
+          if (o.material.map) o.material.map.dispose();
+          o.material.dispose();
+        }
+      });
     }
   }
 
@@ -292,6 +353,23 @@ export class AttackManager {
 
     // 4. Update Turret auto-targeting
     this.turrets.update(delta, this.vehicle);
+
+    // 4b. Drive-over traps and EMP fields
+    if (this.traps) this.traps.update(delta, this.vehicle);
+    if (this.empFields && this.empFields.length) {
+      const p = this.vehicle.position;
+      this.vehicle.isSilenced = this.empFields.some(f =>
+        !f.b.isDestroyed && f.b.mesh &&
+        Math.hypot(p.x - f.b.mesh.position.x, p.z - f.b.mesh.position.z) <= f.radius);
+      // Blocking activation alone let a cloak or nitro burn switched on OUTSIDE the field
+      // carry straight through it. Entering the field cuts whatever is running.
+      if (this.vehicle.isSilenced) {
+        const jammed = this.cards.jamActiveEffects();
+        if (jammed.length && this.ui.showToast) {
+          this.ui.showToast(`\u{1F4E1} EMP FIELD - ${jammed.join(' & ')} cut out!`);
+        }
+      }
+    }
 
     // 5. Update Card Abilities & Projectiles
     this.cards.update(delta, elapsed);
@@ -377,7 +455,7 @@ export class AttackManager {
     const wrecked = this.police.totalWrecked;
     this.police.clear();
     this.police.totalWrecked = wrecked;
-    this.police.spawnFromStations(this.buildings.getPoliceStations());
+    this.police.spawnFromStations(this.buildings.getPoliceStations(), this.buildings.getTownHallLevel());
 
     this.ui.hideTargetBuildingHealth();
     this.ui.updateLivesHUD(left);
@@ -387,6 +465,11 @@ export class AttackManager {
   /** outcome: 'crash' (out of lives) | 'victory' (100% destruction) | 'retreat' (exit button) */
   endAttack(outcome = 'crash') {
     this.state = 'RESULT';
+    // Detach the buggy now, not on CLAIM: the result screen froze the world, but the number keys
+    // and Space still fired cards into it (rockets spawned behind the modal, cooldowns ran).
+    // reset() first, while it can still switch a running cloak or nitro burn off.
+    this.cards.reset();
+    this.cards.setPlayer(null, null);
     this.scene.setAlarmLighting(false);
     this.ui.hideTargetBuildingHealth();
     this.ui.onRetreat = null;
@@ -402,6 +485,29 @@ export class AttackManager {
 
     // Reward looted resources into player treasury!
     this.economy.rewardLoot(finalStats.looted);
+    // A cracked Crypto Vault's contents are in that loot now - leave it empty.
+    this.buildings.emptyCrackedVaults();
+
+    // Gems: a win pays the Town Hall's bounty - the only earnable source of the
+    // instant-finish currency - scaled by how much city AND how much defense was actually
+    // at stake (progression.raidGemsFor). Stowing the city and razing a lone Town Hall pays
+    // nothing, and every kind of defense stowed first (the guns, the EMPs, the traps) costs gems.
+    if (outcome === 'victory' && this.economy.addGems) {
+      const th = this.buildings.getTownHallLevel();
+      const row = townHallRow(th);
+      const threat = this.raidThreat || 0;
+      const gems = raidGemsFor(th, finalStats.total, threat);
+      if (gems > 0) this.economy.addGems(gems);
+      this.attackStats.gems = gems;
+      this.attackStats.gemBounty = row.raidGems;
+      this.attackStats.gemMinTargets = row.raidMinTargets;
+      this.attackStats.gemKinds = this.raidDefense ? this.raidDefense.total : 0;
+      this.attackStats.gemKindShare = RAID_KIND_SHARE;
+      this.attackStats.gemThreat = threat;
+      this.attackStats.gemShort = this.raidDefense
+        ? this.raidDefense.kinds.filter(k => k.cover < 1).map(k => (BUILDING_DEFS[k.type] ? BUILDING_DEFS[k.type].name : k.type))
+        : [];
+    }
 
     // Show summary modal
     setTimeout(() => {
@@ -412,13 +518,25 @@ export class AttackManager {
   }
 
   returnToBuilder() {
+    // Re-arm traps and un-bury landmines so the builder view shows your own defenses.
+    if (this.traps) this.traps.reset();
+    this.vehicle.isSilenced = false;
+    this.empFields = [];
+    this.destruction.player = null;
+
     this.state = 'IDLE';
     this.buildings.setCollectiblesVisible(true);
     this.scene.setCameraMode('builder');
     this.scene.setAlarmLighting(false);
     this.police.clear();
     this.turrets.clear();
+    // Shells still in flight when the raid ended would hang frozen over the builder view and
+    // land on the next raid's buildings.
+    this.vehicle.clearProjectiles();
+    // endAttack already detached the buggy; this keeps a returnToBuilder() called on its own
+    // (tooling, a raid abandoned mid-way) just as safe.
     this.cards.reset();
+    this.cards.setPlayer(null, null);
     this.destruction.clearEffects();
     this.destruction.clearRubble(this.buildings.buildings);
 

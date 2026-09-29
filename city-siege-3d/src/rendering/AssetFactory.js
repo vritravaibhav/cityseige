@@ -7,6 +7,18 @@ import * as THREE from 'three';
 export class AssetFactory {
   constructor() {
     this._initSharedMaterials();
+    this._geoCache = new Map();
+  }
+
+  /**
+   * One geometry per `key`, built by `make` the first time and shared after. For meshes a raid
+   * spawns and throws away by the dozen (rubble, craters): their parts used to be allocated for
+   * every razed building and never disposed, +120 GPU geometries a raid.
+   */
+  _sharedGeo(key, make) {
+    let geo = this._geoCache.get(key);
+    if (!geo) { geo = make(); this._geoCache.set(key, geo); }
+    return geo;
   }
 
   _initSharedMaterials() {
@@ -459,7 +471,7 @@ export class AssetFactory {
       const sx = 0.35 + ((i * 3) % 4) * 0.12;
       const sy = 0.16 + ((i * 5) % 3) * 0.07;
       const sz = 0.3 + ((i * 2) % 4) * 0.11;
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mats[i % mats.length]);
+      const slab = new THREE.Mesh(this._sharedGeo(`rubble-slab:${sx}:${sy}:${sz}`, () => new THREE.BoxGeometry(sx, sy, sz)), mats[i % mats.length]);
       slab.position.set(Math.cos(a) * r, sy / 2, Math.sin(a) * r);
       slab.rotation.set(((i * 11) % 7) * 0.08, a, ((i * 13) % 5) * 0.09);
       slab.castShadow = true;
@@ -467,10 +479,35 @@ export class AssetFactory {
       group.add(slab);
     }
     // Scorched footprint
-    const scorch = new THREE.Mesh(new THREE.CircleGeometry(spread * 0.95, 14), this.materials.asphalt);
+    const scorch = new THREE.Mesh(this._sharedGeo(`rubble-scorch:${spread}`, () => new THREE.CircleGeometry(spread * 0.95, 14)), this.materials.asphalt);
     scorch.rotation.x = -Math.PI / 2;
     scorch.position.y = 0.02;
     group.add(scorch);
+    return group;
+  }
+
+  /**
+   * Crater a spent landmine leaves: a scorched disc, a dark blast pit and a thrown-up dirt lip,
+   * all flat on the ground. Pure decal - nothing collides with it (it is not rubble).
+   */
+  createCrater(footprint = 1) {
+    const group = new THREE.Group();
+    group.name = 'crater';
+    group.userData.isCrater = true;
+
+    const r = 1.1 + footprint * 0.9;
+    const flat = (geo, mat, y) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = y;
+      m.receiveShadow = true;
+      group.add(m);
+      return m;
+    };
+    const geo = (part, make) => this._sharedGeo(`crater-${part}:${r}`, make);
+    flat(geo('scorch', () => new THREE.CircleGeometry(r, 18)), this.materials.asphalt, 0.02);
+    flat(geo('pit', () => new THREE.CircleGeometry(r * 0.55, 16)), this.materials.tireRubber, 0.03);    // matte black
+    flat(geo('lip', () => new THREE.RingGeometry(r * 0.55, r * 0.78, 18)), this.materials.dirtRoad, 0.035); // thrown-up dirt
     return group;
   }
 
@@ -1873,6 +1910,11 @@ export class AssetFactory {
       primaryColor = '#00e5ff';
       glowColor = 'rgba(0, 229, 255, 0.45)';
       icon = '⚙️';
+    } else if (type === 'all') {
+      // Antimatter Collider: one tap pays cash, iron AND wood, so the bubble shows all three.
+      primaryColor = '#e040fb';
+      glowColor = 'rgba(224, 64, 251, 0.45)';
+      icon = null;
     }
 
     // Outer glow aura
@@ -1902,11 +1944,18 @@ export class AssetFactory {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.stroke();
 
-    // Resource Emoji Icon
-    ctx.font = '82px sans-serif';
+    // Resource Emoji Icon (three smaller ones in a triangle for a producer that pays all three)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(icon, 128, 126);
+    if (icon) {
+      ctx.font = '82px sans-serif';
+      ctx.fillText(icon, 128, 126);
+    } else {
+      ctx.font = '48px sans-serif';
+      ctx.fillText('💰', 128, 96);
+      ctx.fillText('⚙️', 98, 146);
+      ctx.fillText('🪵', 158, 146);
+    }
 
     // "COLLECT" badge at bottom
     ctx.fillStyle = primaryColor;

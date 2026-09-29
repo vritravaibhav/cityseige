@@ -1,0 +1,212 @@
+<title>City Siege Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#eef2f6; --panel:#ffffff; --panel2:#f5f8fb; --ink:#0f1a2a; --dim:#56687b; --line:#d6dee7;
+  --cyan:#00798a; --cyan-soft:rgba(0,121,138,.10); --gold:#8f6a00; --gold-soft:rgba(143,106,0,.10);
+  --red:#c2002b; --green:#00805a; --blue:#3b5bdb; --bar:rgba(0,121,138,.16);
+  --f-display:'Chakra Petch','Segoe UI',system-ui,sans-serif;
+  --f-body:'IBM Plex Sans','Segoe UI',system-ui,-apple-system,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --ground:#0a0e18; --panel:#121826; --panel2:#0f1520; --ink:#e7eef6; --dim:#90a4ae; --line:#233044;
+  --cyan:#00e5ff; --cyan-soft:rgba(0,229,255,.09); --gold:#ffd700; --gold-soft:rgba(255,215,0,.09);
+  --red:#ff5c7a; --green:#00e676; --blue:#7c9cff; --bar:rgba(0,229,255,.16);
+}}
+:root[data-theme="dark"]{
+  --ground:#0a0e18; --panel:#121826; --panel2:#0f1520; --ink:#e7eef6; --dim:#90a4ae; --line:#233044;
+  --cyan:#00e5ff; --cyan-soft:rgba(0,229,255,.09); --gold:#ffd700; --gold-soft:rgba(255,215,0,.09);
+  --red:#ff5c7a; --green:#00e676; --blue:#7c9cff; --bar:rgba(0,229,255,.16);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--ground); color:var(--ink); font:15px/1.6 var(--f-body); padding-inline:16px}
+.wrap{max-width:1200px; margin:0 auto; padding-block:40px 80px; display:grid; grid-template-columns:190px minmax(0,1fr); gap:40px}
+nav.toc{position:sticky; top:calc(env(safe-area-inset-top,0px) + 20px); align-self:start; font-size:13px; display:flex; flex-direction:column; gap:2px}
+nav.toc .h{font:600 11px var(--f-display); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); margin:14px 0 4px}
+nav.toc a{color:var(--ink); text-decoration:none; padding:3px 8px; border-radius:6px}
+nav.toc a:hover,nav.toc a:focus-visible{background:var(--cyan-soft); color:var(--cyan); outline:none}
+nav.toc .ths{display:flex; flex-wrap:wrap; gap:4px; padding:2px 0 4px 8px}
+nav.toc .ths a{padding:1px 7px; border:1px solid var(--line); font:500 11px var(--f-mono)}
+main{min-width:0}
+h1,h2,h3{font-family:var(--f-display); text-wrap:balance; line-height:1.15; margin:0}
+h1{font-size:46px; font-weight:700; letter-spacing:-.01em}
+h1 .tick{color:var(--cyan)}
+h2{font-size:26px; font-weight:600; margin:56px 0 6px; padding-top:10px; border-top:2px solid var(--ink)}
+.eyebrow{font:600 12px var(--f-display); letter-spacing:.14em; text-transform:uppercase; color:var(--cyan)}
+.lead{color:var(--dim); max-width:70ch; margin:10px 0 18px}
+p{max-width:72ch}
+.dim{color:var(--dim)} .small{font-size:12px; line-height:1.4} .nowrap{white-space:nowrap}
+code{font:500 12.5px var(--f-mono); background:var(--panel2); border:1px solid var(--line); padding:0 5px; border-radius:4px}
+.rules{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; margin:20px 0}
+.rule{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px}
+.rule b{display:block; font-family:var(--f-display); font-size:15px; margin-bottom:4px}
+.rule p{margin:0; font-size:13.5px; color:var(--dim)}
+.formulas{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px}
+.fx{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; min-width:0}
+.fx h3{font-size:15px; margin-bottom:8px}
+.fx .eq{font:500 13px var(--f-mono); background:var(--cyan-soft); border-radius:6px; padding:8px 10px; margin-bottom:8px; overflow-x:auto; white-space:nowrap}
+.fx p{margin:0; font-size:13.5px}
+.fx .ex{margin-top:6px; font-size:12.5px; color:var(--dim)}
+.tbl{overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel); margin:14px 0}
+table{border-collapse:collapse; width:100%; font-size:13px}
+th,td{padding:7px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top}
+thead th{font:600 11px var(--f-display); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); background:var(--panel2)}
+tbody tr:last-child > *{border-bottom:0}
+td.num,.matrix td,.strip td{font-family:var(--f-mono); font-variant-numeric:tabular-nums}
+td.num{text-align:right}
+.matrix th[scope=row]{white-space:nowrap; font-weight:500}
+.matrix td{text-align:right; white-space:nowrap}
+td.off{color:var(--dim); opacity:.55}
+.chip{display:inline-block; font-size:12px; padding:1px 8px; margin:2px 3px 2px 0; border-radius:20px; background:var(--gold-soft); border:1px solid var(--line); white-space:nowrap}
+.res{white-space:nowrap; font-family:var(--f-mono); font-size:12.5px}
+.thgroup{margin-top:34px}
+.thhead{font-size:18px; display:flex; align-items:baseline; flex-wrap:wrap; gap:10px; margin-bottom:12px}
+.thnum{font:700 13px var(--f-mono); color:var(--ground); background:var(--cyan); padding:3px 9px; border-radius:6px}
+.cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(430px,1fr)); gap:14px}
+.bcard{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:0}
+.bcard header{display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; align-items:start}
+.bicon{font-size:26px; width:44px; height:44px; display:grid; place-items:center; background:var(--panel2); border:1px solid var(--line); border-radius:10px}
+.bcard h3{font-size:17px}
+.tags{display:flex; flex-direction:column; gap:4px; align-items:flex-end}
+.role,.th{font:600 10.5px var(--f-display); letter-spacing:.1em; text-transform:uppercase; padding:2px 8px; border-radius:5px; white-space:nowrap}
+.th{background:var(--cyan-soft); color:var(--cyan)}
+.role{border:1px solid currentColor}
+.r-turret,.r-gate{color:var(--red)} .r-trap,.r-barrier{color:var(--gold)} .r-spawner{color:var(--blue)}
+.r-producer,.r-storage{color:var(--green)} .r-aura,.r-research{color:var(--cyan)} .r-core,.r-scenery{color:var(--dim)}
+.helps{margin:0; font-size:13.5px}
+.lbl{display:block; font:600 10.5px var(--f-display); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); margin-bottom:2px}
+.mech{margin:0; padding-left:18px; font-size:13px} .mech li{margin:3px 0} .mech b{color:var(--cyan); font-weight:600}
+.facts{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 16px; margin:0; font-size:12.5px}
+.facts dt{font:600 10.5px var(--f-display); letter-spacing:.1em; text-transform:uppercase; color:var(--dim)}
+.facts dd{margin:0}
+.strip-wrap{overflow-x:auto}
+.strip{font-size:11.5px} .strip th,.strip td{padding:3px 5px; text-align:right; border-bottom:1px solid var(--line)}
+.strip thead th{font-size:10px; background:none}
+.strip th[scope=row]{text-align:left; font:600 10px var(--f-display); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); white-space:nowrap}
+.strip td{position:relative; white-space:nowrap}
+.strip .bar{position:absolute; left:2px; right:2px; bottom:1px; height:var(--h); max-height:calc(100% - 2px); background:var(--bar); border-radius:2px}
+.strip .v{position:relative}
+.steps{counter-reset:s; list-style:none; padding:0; display:grid; gap:10px; max-width:78ch}
+.steps li{counter-increment:s; display:grid; grid-template-columns:34px 1fr; gap:10px; align-items:start}
+.steps li::before{content:counter(s); font:700 14px var(--f-mono); width:28px; height:28px; display:grid; place-items:center; border-radius:50%; background:var(--cyan-soft); color:var(--cyan)}
+.note{border-left:3px solid var(--gold); background:var(--gold-soft); padding:10px 14px; border-radius:0 8px 8px 0; font-size:13.5px; max-width:78ch; margin:14px 0}
+ul.gaps{max-width:78ch} ul.gaps li{margin:6px 0}
+footer{margin-top:60px; color:var(--dim); font-size:12px}
+@media (max-width:900px){ .wrap{grid-template-columns:1fr; padding-block:24px 60px; gap:20px} nav.toc{position:static; flex-direction:row; flex-wrap:wrap; gap:4px} nav.toc .h{width:100%; margin:6px 0 0} .cards{grid-template-columns:1fr} h1{font-size:34px} }
+@media (max-width:480px){ .facts{grid-template-columns:1fr} .bcard header{grid-template-columns:auto minmax(0,1fr)} .tags{grid-column:1/-1; flex-direction:row; align-items:center} }
+@media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} }
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="h">Handbook</div>
+  <a href="#rules">The five rules</a>
+  <a href="#formulas">The formulas</a>
+  <a href="#ladder">Town Hall ladder</a>
+  <a href="#buildings">Every building</a>
+  <div class="ths">{{TOC}}</div>
+  <a href="#raid">How a raid works</a>
+  <a href="#garage">Buggy &amp; garage</a>
+  <a href="#saves">Saving &amp; timers</a>
+  <a href="#tables">Master tables</a>
+  <a href="#knobs">Knobs you can change</a>
+  <a href="#gaps">Known gaps</a>
+</nav>
+
+<main>
+  <div class="eyebrow">City Siege 3D · Town Hall 1 → 12</div>
+  <h1>City Siege Handbook<span class="tick">.</span></h1>
+  <p class="lead">Every building, what it does, its health at every level, and the exact rule behind every number. Generated from the game's own rules file (<code>src/data/progression.js</code>) on {{DATE}}. If the game and this page ever disagree, the code changed after this was generated. Rerun <code>node tools/handbook/gen-handbook.mjs</code>.</p>
+
+  <h2 id="rules">The five rules</h2>
+  <p class="lead">Everything else in this handbook follows from these.</p>
+  <div class="rules">
+    <div class="rule"><b>Town Hall level is your city tier</b><p>No other building can go above the Town Hall's level. The Town Hall itself goes to 12.</p></div>
+    <div class="rule"><b>Every Town Hall level unlocks something</b><p>At least one new building, plus higher build limits, more land, a bigger police force and a bigger raid bounty. Some levels also add labour.</p></div>
+    <div class="rule"><b>Every building type has a limit</b><p>How many you may own depends on your Town Hall. The shop counts what's placed <i>and</i> what's in your inventory, so you can't stockpile past it.</p></div>
+    <div class="rule"><b>Building takes real time</b><p>Jobs double in length every level, up to {{MAXT}}, and keep running with the game closed. So do your producers. Gems finish a job early.</p></div>
+    <div class="rule"><b>Each job needs a free labourer</b><p>Labour Huts provide labourers, but the Town Hall caps how many can work: {{LAB}} from Town Hall 1 to 12.</p></div>
+  </div>
+
+  <h2 id="formulas">The formulas</h2>
+  <p class="lead">These are the actual algorithms. "Base" is the building's level-1 value, shown on every card below. L is the level.</p>
+  <div class="formulas">
+    <div class="fx"><h3>Health</h3><div class="eq">HP = base × (1 + {{HP_PCT}} × (L − 1))</div><p>A straight line. Barriers (Roadblock, Spike Trap) grow {{BARRIER_PCT}} per level instead, because they start very tough.</p><p class="ex">Laser Obelisk: {{OBELISK}}.</p></div>
+    <div class="fx"><h3>Upgrade cost</h3><div class="eq">cost of level L = shop price × {{COSTX}}^(L − 1)</div><p>Each level costs {{COSTX}}× the one before, for cash, iron and wood alike.</p><p class="ex">Town Hall: {{THCOST}}.</p></div>
+    <div class="fx"><h3>Build time</h3><div class="eq">seconds = buildBase × 2^(L − 1), capped at {{MAXT}}</div><p>Doubles every level. Most buildings hit the cap around level 10–11.</p><p class="ex">Town Hall: {{THTIME}}.</p></div>
+    <div class="fx"><h3>Finishing early</h3><div class="eq">&lt;1 min: 1 gem · 1 hour: {{G1H}} · 8 hours: {{GMAX}} · 24 hours: {{G24H}}</div><p>Gems scale with the time left, so gemming a short job is cheap and a long one is not.</p><p class="ex">You start with {{START_GEMS}} gems. The only way to earn more is winning raids ({{GEM_LOW}} at Town Hall 1, {{GEM_HIGH}} at Town Hall 12).</p></div>
+    <div class="fx"><h3>Production</h3><div class="eq">rate × (1 + {{PROD_PCT}} × (L − 1)) · storage × (1 + {{CAP_PCT}} × (L − 1))</div><p>Producers fill while the game is open <i>and</i> closed, and stop when full. Storage holds hours of output, so check in a few times a day.</p><p class="ex">The Crypto Vault is the exception: it can't be tapped and only pays out when a raid breaks it.</p></div>
+    <div class="fx"><h3>Turrets</h3><div class="eq">range +{{T_RANGE}}/L · damage +{{T_DMG}}/L · interval −{{T_RATE}}/L (floor {{T_FLOOR}})</div><p>Levels mostly buy a gun HP and reach; damage grows slowly, and some turrets grow it faster (see each card). Every round lands, so each gun you add adds its damage. A parked raider tuned to your Town Hall survives your whole kill box for {{KILL_MIN}}–{{KILL_MAX}}s.</p><p class="ex">Auras multiply on top: Solar (rate), Fusion (damage), Orbital Relay (range + damage). The same aura twice doesn't stack.</p></div>
+    <div class="fx"><h3>Build limits</h3><div class="eq">allowed = BUILD_LIMITS[building][Town Hall]</div><p>A hand-set table, not a formula: 36 buildings × 12 Town Halls. Shown on every card and in full under Master tables.</p><p class="ex">Roadblocks: {{RB1}} at TH1, {{RB12}} at TH12.</p></div>
+    <div class="fx"><h3>Labour</h3><div class="eq">labourers = min(Labour Huts built, Town Hall cap)</div><p>A hut past the cap does nothing until you upgrade the Town Hall.</p><p class="ex">Cap by Town Hall: {{LAB}}.</p></div>
+    <div class="fx"><h3>Roads</h3><div class="eq">off the asphalt: -{{ONROAD}} top speed, -{{ONROADA}} acceleration</div><p>Roads are the fast lanes - for the raider and for your police alike. Leave them out and everyone slows down.</p><p class="ex">The road budget grows every Town Hall, so shaping the route is a real defensive lever.</p></div>
+    <div class="fx"><h3>Taking damage</h3><div class="eq">guns always land · contact buffer {{IMM}}s · hop every {{HOP}}s</div><p>Turret fire, beams, splash and traps always deal their damage, so more guns really is more pressure. Only a police or SWAT contact leaves a brief buffer. The free hop stops you getting stuck but cannot keep you airborne (at most {{HOPAIR}} of a raid).</p><p class="ex">Landmines inside {{MINEWIN}}s of each other do not all fire, and a building razed by another building's explosion pays only {{CHAINLOOT}} of its loot.</p></div>
+    <div class="fx"><h3>Your gun</h3><div class="eq">autocannon {{CANNON}} per shell ({{CANNONU}} vs police)</div><p>The autocannon is what actually razes a city, and the Weapons Lab is the only thing that grows it - by level 12 it hits for {{CANNON12}}, keeping pace with building health.</p><p class="ex">Cards are burst damage; the cannon is the clock.</p></div>
+    <div class="fx"><h3>Land</h3><div class="eq">build radius: {{R1}} tiles at TH1 → {{R12}} at TH12</div><p>One tile is 5.5m. The city wall sits at 15 tiles, so each Town Hall opens a new ring of land inside it.</p><p class="ex">Anything already beyond your radius stays; you just can't place new things there yet.</p></div>
+  </div>
+
+  <h2 id="ladder">Town Hall ladder</h2>
+  <p class="lead">What each Town Hall level gives you. "More of" counts how many building types get a higher limit. The last column is the cost and time to reach that level.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>TH</th><th>City</th><th>New blueprints</th><th>More of</th><th>Labour</th><th>Radius</th><th>Police cap</th><th>Gem bounty</th><th>TH HP</th><th>Upgrade</th></tr></thead>
+    <tbody>{{LADDER}}</tbody>
+  </table></div>
+
+  <h2 id="buildings">Every building</h2>
+  <p class="lead">Grouped by the Town Hall that unlocks them. Each card shows what the building promises, the mechanics behind it (level 1 → level 12), its health at all 12 levels, and how many you may own at each Town Hall (— means still locked).</p>
+  {{BUILDINGS}}
+
+  <h2 id="raid">How a raid works</h2>
+  <p class="lead">You raid your own city with the buggy. Your defenses fight back, and whatever you destroy pays out as loot.</p>
+  <ol class="steps">
+    <li><div><b>Recon.</b> The camera frames your three gates. Tap one to choose where to break in.</div></li>
+    <li><div><b>Breach.</b> The buggy rams the gate. Sirens start. Every turret, trap, spawner and aura arms at this moment, at its current level.</div></li>
+    <li><div><b>Combat.</b> The buggy ({{BUGGY}} stock) auto-fires its cannon. Gates shoot back ({{GATE}}). A police cruiser or SWAT unit touching you is an instant bust. Drones strafe you even mid-air. Traps fire when you drive over them (your rounds fly over them). Inside an EMP field your ability cards are jammed.</div></li>
+    <li><div><b>Hopping.</b> Space is a free small hop with a {{HOP}}s cooldown, so you can always get over a barrier but can't stay airborne. After a ram or a blast, further rams and blasts do nothing for {{IMM}}s; gunfire always lands.</div></li>
+    <li><div><b>Lives.</b> {{LIVES}} lives per raid, plus up to 2 spares bought in the garage. Losing all armor or getting busted costs a life, and the police redeploy.</div></li>
+    <li><div><b>Result.</b> Destroying 100% wins. Gates, trees and traps don't count toward the 100%. You can retreat at any time and keep what you've looted.</div></li>
+  </ol>
+  <div class="note"><b>Loot per destroyed building:</b> {{LOOT}}. Trees and landmines pay nothing. A Crypto Vault adds everything it has mined.<br>
+  <b>Gem bounty on a win</b> pays in full only for a real fight: the city must have enough buildings <i>and</i> every kind of defense its Town Hall allows, each with {{KINDSHARE}} of its build limit standing at the Town Hall's level. Every gun, pursuit base (police, SWAT, drones), trap and aura building (Solar Array, Fusion Reactor, EMP Disrupter, Orbital Relay, Quantum Citadel) is its own kind, and every kind weighs the same (TH1: {{MINT1}} targets and {{KINDS1}} kind of defense; TH12: {{MINT12}} targets and {{KINDS12}} kinds). Short of either, the bounty is scaled down: a Town Hall 12 city with its EMPs, Relays and Citadel stowed pays {{GEMS12AURA}} of {{GEM_HIGH}} gems, and with its traps stowed too {{GEMS12TRAPS}}. Stowing everything and raiding an empty city pays nothing.</div>
+
+  <h2 id="garage">Buggy &amp; garage</h2>
+  <p class="lead">Offense lives in the Vehicle Garage. Five tuning tracks go to level 12, and <b>Vehicle Lab level L opens tuning level L+1</b>, so the garage keeps growing with the city. Deck slots by Vehicle Lab 0 / 1 / 2 / 3: {{SLOTS}}. Card gates: {{GATES}}.</p>
+  <h3 style="font-size:16px; margin-top:18px">Tuning tracks (each level costs {{TRACKX}}× the one before)</h3>
+  <div class="tbl"><table class="matrix"><thead><tr><th>Track</th><th>Stock</th><th>L3</th><th>L6</th><th>L9</th><th>L12</th><th>L1 price</th><th>L12 price</th></tr></thead><tbody>{{TRACKS}}</tbody></table></div>
+  <h3 style="font-size:16px; margin-top:18px">Ability cards (level 1 → 5)</h3>
+  <div class="tbl"><table><thead><tr><th>Card</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th></tr></thead><tbody>{{CARDS}}</tbody></table></div>
+
+  <h2 id="saves">Saving &amp; timers</h2>
+  <p class="lead">Three things are saved in the browser, separately.</p>
+  <div class="tbl"><table><thead><tr><th>Save key</th><th>Holds</th><th>When it saves</th></tr></thead><tbody>
+    <tr><th scope="row"><code>city_siege_city</code></th><td>Every building's type, tile, level and rotation; every road tile; stored output; every running build job as an <b>end time</b>, not a countdown.</td><td>Within a second of any change, and when the tab is hidden or closed.</td></tr>
+    <tr><th scope="row"><code>city_siege_eco</code></th><td>Cash, iron, wood, gems, the Construction Inventory, the level of each stowed building, spare lives.</td><td>On every spend, collect or purchase.</td></tr>
+    <tr><th scope="row"><code>city_siege_garage</code></th><td>Tuning levels, card unlocks and levels, the raid deck.</td><td>On every garage purchase.</td></tr>
+  </tbody></table></div>
+  <div class="note">Jobs are saved as end times, so they keep counting down while the game is closed. On the next launch, finished jobs show as "finished while you were away" and producers catch up on what they made. A save that won't load is kept as <code>&lt;key&gt;.bak</code> instead of being overwritten. Jobs never complete mid-raid; they wait until you're back in the city.</div>
+
+  <h2 id="tables">Master tables</h2>
+  <p class="lead">The same numbers as the cards, all in one place for comparing.</p>
+  <h3 style="font-size:16px; margin-top:10px">Health by level</h3>
+  <div class="tbl"><table class="matrix"><thead><tr><th>Building</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th><th>L6</th><th>L7</th><th>L8</th><th>L9</th><th>L10</th><th>L11</th><th>L12</th></tr></thead><tbody>{{HPMATRIX}}</tbody></table></div>
+  <h3 style="font-size:16px; margin-top:22px">How many you may own, by Town Hall</h3>
+  <div class="tbl"><table class="matrix"><thead><tr><th>Building</th><th>TH1</th><th>TH2</th><th>TH3</th><th>TH4</th><th>TH5</th><th>TH6</th><th>TH7</th><th>TH8</th><th>TH9</th><th>TH10</th><th>TH11</th><th>TH12</th></tr></thead><tbody>{{LIMMATRIX}}</tbody></table></div>
+
+  <h2 id="knobs">Knobs you can change</h2>
+  <p class="lead">If an algorithm feels wrong, it's one of these, all in <code>src/data/progression.js</code>. Tell me the knob and the new value, or the behaviour you want instead, and it changes in one place.</p>
+  <div class="tbl"><table><thead><tr><th>Knob</th><th>Now</th><th>What it controls</th></tr></thead><tbody>{{KNOBS}}</tbody></table></div>
+
+  <h2 id="gaps">Known gaps</h2>
+  <p class="lead">Things deliberately not done yet, for you to decide on.</p>
+  <ul class="gaps">
+    <li><b>Main Gates are fixed at 3.</b> They sit on the wall and can't be bought, placed or upgraded. Making them placeable needs a rule for where a raid can start.</li>
+    <li><b>The original 16 buildings only have 3 looks.</b> Their stats grow to level 12, but their model stops changing after level 3. The 18 new buildings change look through level 6.</li>
+    <li><b>Touch driving controls don't work.</b> The mobile buttons point at page elements that don't exist, so raids need a keyboard. Unrelated to progression and untouched.</li>
+  </ul>
+  <footer>City Siege Handbook · generated from source · every number is the code's, not an estimate.</footer>
+</main>
+</div>

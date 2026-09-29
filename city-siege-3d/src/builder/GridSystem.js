@@ -30,14 +30,16 @@ export class GridSystem {
     this.pointerCurrentPos = { x: 0, y: 0 };
     this.hasMovedPastThreshold = false;
 
-    this.maxCityRadius = 15; // Grid radius in tiles (~82.5m, within fortified walls)
+    // Buildable radius comes from the Town Hall ladder (see get maxCityRadius below).
     this.onSelectBuilding = null;
     this.dragBuilding = null;
     this.dragOrigin = null;
     this.onHarvest = null;
     this.onInventoryPlaced = null;
     this.onOutOfRoads = null;
+    this.onOutsideCity = null;
     this.onRoadUpdated = null;
+    this.onModeChange = null;
 
     // Hover Cursor Indicator
     const ts = this.tileSize;
@@ -50,6 +52,15 @@ export class GridSystem {
     this.scene.add(this.cursorMesh);
 
     this._initEvents();
+  }
+
+  /**
+   * Buildable radius in tiles. Grows with the Town Hall from 11.5 to 14.8, just inside the
+   * perimeter wall at 15 (82.5m), so every level opens a new ring of land - and never beyond
+   * the wall, where a building would be outside the raid map.
+   */
+  get maxCityRadius() {
+    return this.buildingManager ? this.buildingManager.buildRadius : 15;
   }
 
   get tileSize() {
@@ -97,6 +108,8 @@ export class GridSystem {
       this.cursorMesh.scale.set(scale, 1, scale);
       this.cursorMesh.material.color.setHex(0x00e5ff);
     }
+
+    if (this.onModeChange) this.onModeChange(mode, param);
   }
 
   getWorldIntersection(event) {
@@ -145,8 +158,11 @@ export class GridSystem {
 
   onPointerDown(event) {
     if (event.button !== 0) return; // Left click only
-    // Ignore clicks if interacting with UI overlay elements
-    if (event.target.closest('#ui-container button, #ui-container .modal-backdrop, #ui-container .build-drawer, #ui-container .design-bottom-drawer, #ui-container .shop-screen, #ui-container .blueprint-card')) {
+    // A press on ANY part of the HUD is the HUD's, never the map's. #ui-container is
+    // pointer-events:none, so a target inside it is always an element that opted in to the
+    // pointer. (A list of selectors missed the building inspector: a press on its text picked
+    // up and moved the building hidden behind it, drew a road there, or panned the camera.)
+    if (event.target && event.target.closest && event.target.closest('#ui-container')) {
       return;
     }
 
@@ -190,13 +206,44 @@ export class GridSystem {
     return !!b && b.type === 'tree';
   }
 
+  /** Side of the square a structure covers, in tiles (BuildingManager.footprintOf). */
+  footprintOf(typeOrBuilding) {
+    return this.buildingManager.footprintOf(typeOrBuilding);
+  }
+
+  /**
+   * Would a `footprint`-sized structure centred on (gx, gz) overlap an existing one? The rule
+   * lives in BuildingManager.isFootprintBlocked (a save repair places a Town Hall with it too);
+   * the old fixed +/-1 test here kept every pair of blocks two tiles apart and left a gap a
+   * buggy drove through.
+   */
+  isFootprintBlocked(footprint, gx, gz, ignore = null) {
+    return this.buildingManager.isFootprintBlocked(footprint, gx, gz, ignore);
+  }
+
   /** A tile is a legal drop target if it is inside the city and not on top of another structure. */
   isValidDropTile(building, gx, gz) {
     if (Math.hypot(gx, gz) > this.maxCityRadius) return false;
-    return !this.buildingManager.buildings.some(o =>
-      o !== building && !o.isDestroyed && !this.isDecoration(o) &&
-      Math.abs(o.gx - gx) <= 1 && Math.abs(o.gz - gz) <= 1
-    );
+    return !this.isFootprintBlocked(this.footprintOf(building), gx, gz, building);
+  }
+
+  /**
+   * The structure standing on (gx, gz), for taps the raycast missed: one whose footprint
+   * covers the tile, else the nearest within a tile. (Taking the first one within +/-1
+   * picked the wrong block out of a chained wall.) Decoration only if nothing else is there.
+   */
+  buildingAtTile(gx, gz) {
+    let best = null;
+    let bestScore = Infinity;
+    for (const b of this.buildingManager.buildings) {
+      const dx = Math.abs(b.gx - gx);
+      const dz = Math.abs(b.gz - gz);
+      if (dx > 1 || dz > 1) continue;
+      const covers = Math.max(dx, dz) < this.footprintOf(b) / 2;
+      const score = (covers ? 0 : 10) + (this.isDecoration(b) ? 5 : 0) + Math.hypot(dx, dz);
+      if (score < bestScore) { bestScore = score; best = b; }
+    }
+    return best;
   }
 
   onPointerMove(event) {
@@ -292,9 +339,6 @@ export class GridSystem {
         const target = worldPoint ? this.worldToGrid(worldPoint) : null;
         if (target && this.isValidDropTile(b, target.gx, target.gz)) {
           this.buildingManager.moveBuilding(b, target.gx, target.gz);
-          if (b.bubbleMesh) {
-            b.bubbleMesh.position.set(target.gx * this.tileSize, 5.0, target.gz * this.tileSize);
-          }
           this.sound.playPlace();
         } else {
           // Illegal drop - put it back exactly where it came from.
@@ -328,14 +372,13 @@ export class GridSystem {
 
     // 1. HOME SCREEN MODE: Manual Tap-to-Collect or Inspect
     if (this.mode === 'home') {
-      const clickedBuilding = this.findBuildingFromRaycast(event) || this.buildingManager.buildings.find(b => {
-        return Math.abs(b.gx - gx) <= 1 && Math.abs(b.gz - gz) <= 1;
-      });
+      const clickedBuilding = this.findBuildingFromRaycast(event) || this.buildingAtTile(gx, gz);
 
       if (!clickedBuilding) return;
 
       // If factory has harvestable resources (stored >= 12), harvest immediately!
-      if (clickedBuilding.produceType && (clickedBuilding.stored || 0) >= 12) {
+      // (A Crypto Vault cannot be tapped - it only pays out when raided - so it inspects.)
+      if (clickedBuilding.produceType && !clickedBuilding.raidOnly && (clickedBuilding.stored || 0) >= 12) {
         const harvest = this.buildingManager.collectBuilding(clickedBuilding);
         if (harvest) {
           this.sound.playCollectChime();
@@ -343,6 +386,7 @@ export class GridSystem {
             this.onHarvest({
               type: harvest.type,
               amount: harvest.amount,
+              payout: harvest.payout,
               clientX: event.clientX,
               clientY: event.clientY,
               worldPos: clickedBuilding.mesh.position
@@ -362,6 +406,7 @@ export class GridSystem {
 
     // Editing modes require being strictly inside the city boundary!
     if (isOutside) {
+      if ((this.mode === 'draw_road' || this.mode === 'erase_road') && this.onOutsideCity) this.onOutsideCity();
       return;
     }
 
@@ -374,6 +419,14 @@ export class GridSystem {
         if (this.onOutOfRoads) {
           this.onOutOfRoads();
         }
+        return;
+      }
+
+      // Road tiles are budgeted per Town Hall level just like every other type.
+      const roadGate = this.buildingManager.canPlace('road');
+      if (!roadGate.ok) {
+        if (this.onRoadLimitReached) this.onRoadLimitReached(roadGate);
+        this.sound.playCrash(0.3);
         return;
       }
 
@@ -407,23 +460,28 @@ export class GridSystem {
         return;
       }
 
-      // Town Hall gating also applies at placement time, so items bought before a downgrade
-      // (or seeded into inventory) still cannot appear above your city tier.
+      // One authority for "may this exist": Town Hall unlock AND the per-type build limit.
+      // Items bought before a limit was reached, seeded into inventory, or stowed and
+      // re-placed all funnel through here, so the cap cannot be laundered.
       const defForType = this.buildingManager.catalog[type];
-      const reqTH = defForType && defForType.unlockTownHall ? defForType.unlockTownHall : 1;
-      if (this.buildingManager.getTownHallLevel() < reqTH) {
-        alert(`${defForType ? defForType.name : type} unlocks at Town Hall ${reqTH}. Upgrade your Town Hall first.`);
+      const gate = this.buildingManager.canPlace(type);
+      if (!gate.ok) {
+        const label = defForType ? defForType.name : type;
+        if (gate.reason === 'LOCKED') {
+          alert(`${label} unlocks at Town Hall ${gate.requiredTH}. Upgrade your Town Hall first.`);
+        } else if (gate.reason === 'AT_LIMIT') {
+          alert(`${label}: you already have ${gate.have} of ${gate.limit}. ` +
+            'Upgrade your Town Hall to raise the limit.');
+        } else {
+          alert(`${label} cannot be placed right now.`);
+        }
         this.setMode('design_select');
         return;
       }
 
-      // Check if tile is occupied by an existing building
-      // Trees are scenery and used to block placement across most of the map.
-      const occupied = this.buildingManager.buildings.some(b => {
-        if (this.isDecoration(b) || b.isDestroyed) return false;
-        return Math.abs(b.gx - gx) <= 1 && Math.abs(b.gz - gz) <= 1;
-      });
-      if (occupied) {
+      // Check if the footprint overlaps an existing building (footprint-aware, so 1-tile
+      // barriers can sit side by side). Trees are scenery and never block placement.
+      if (this.isFootprintBlocked(this.footprintOf(type), gx, gz)) {
         this.sound.playCrash(0.3);
         return;
       }
@@ -431,14 +489,23 @@ export class GridSystem {
       // Place building on map FIRST - addBuilding returns null for any type that has no
       // mesh factory, and consuming the inventory item before that check silently destroyed
       // the player's purchase (cash + iron + wood) with nothing placed on the map.
-      const b = this.buildingManager.addBuilding(type, gx, gz, 1);
+      // A stowed building comes back at the level it left at.
+      const level = this.economy.peekStowedLevel ? this.economy.peekStowedLevel(type) : 1;
+      const b = this.buildingManager.addBuilding(type, gx, gz, level);
       if (!b) {
         console.error(`[GridSystem] No mesh factory for building type "${type}" - placement aborted, inventory refunded.`);
         this.sound.playCrash(0.3);
         return;
       }
 
-      // Only now is the placement real - consume 1 from player inventory
+      // Only now is the placement real - consume 1 from player inventory. A building coming
+      // back out of storage brings only what it took in: a producer's output was banked when
+      // it was stowed, and a Crypto Vault's sealed cash travelled with it. (The starter seed is
+      // for new purchases - re-seeding here paid it out again on every stow and place.)
+      const back = this.economy.takeStowed ? this.economy.takeStowed(type) : null;
+      if (back && back.fromStorage && b.produceType) {
+        b.stored = Math.min(b.maxCapacity, back.sealed);
+      }
       this.economy.consumeFromInventory(type);
 
       {
@@ -456,21 +523,30 @@ export class GridSystem {
     }
 
     // 5. RELOCATE BUILDING
+    // Same rules as dragging: gates and buildings mid-upgrade stay put, and the drop tile must
+    // be free. ('Pick Up & Move' used to skip both, stacking two buildings on one tile - which
+    // a save then could not tell apart - and leaving an upgrade's hammer behind.)
     if (this.mode === 'relocate' && this.relocatingBuilding) {
-      this.buildingManager.moveBuilding(this.relocatingBuilding, gx, gz);
-      if (this.relocatingBuilding.bubbleMesh) {
-        this.relocatingBuilding.bubbleMesh.position.set(gx * this.tileSize, 5.0, gz * this.tileSize);
+      const b = this.relocatingBuilding;
+      if (!this.isDraggableBuilding(b)) {
+        this.sound.playCrash(0.3);
+        this.setMode('design_select');
+        return;
       }
-      this.sound.playPlace();
+      if (!this.isValidDropTile(b, gx, gz)) {
+        this.sound.playCrash(0.3);   // stay in relocate mode so the player can pick another tile
+        return;
+      }
+      const moved = this.buildingManager.moveBuilding(b, gx, gz);
+      if (moved && moved.ok) this.sound.playPlace();
+      else this.sound.playCrash(0.3);   // no longer on the map (a preset replaced it)
       this.setMode('design_select');
       return;
     }
 
     // 6. DESIGN MAP SELECT (Architect Inspection / Move / Stow)
     if (this.mode === 'design_select') {
-      const clickedBuilding = this.findBuildingFromRaycast(event) || this.buildingManager.buildings.find(b => {
-        return Math.abs(b.gx - gx) <= 1 && Math.abs(b.gz - gz) <= 1;
-      });
+      const clickedBuilding = this.findBuildingFromRaycast(event) || this.buildingAtTile(gx, gz);
 
       this.selectedBuilding = clickedBuilding || null;
       if (this.onSelectBuilding) {

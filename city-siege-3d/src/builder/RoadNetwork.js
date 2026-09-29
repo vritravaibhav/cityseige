@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TILE_METRES } from '../data/progression.js';
 
 /**
  * RoadNetwork - Manages road tile geometry, path rendering,
@@ -9,11 +10,12 @@ export class RoadNetwork {
     this.scene = scene;
     this.assetFactory = assetFactory;
     this.roads = new Map(); // key "x,z" -> { gx, gz, mesh }
+    this.onChange = null;
     this.roadGroup = new THREE.Group();
     this.roadGroup.name = 'city_road_network';
     this.scene.add(this.roadGroup);
 
-    this.tileSize = 5.5; // Thicker, wider road lanes
+    this.tileSize = TILE_METRES; // one grid tile (progression.js); thick, wide road lanes
   }
 
   getKey(gx, gz) {
@@ -30,6 +32,7 @@ export class RoadNetwork {
 
     this.roads.set(key, { gx, gz, mesh: null });
     this.refreshTileAndNeighbors(gx, gz);
+    if (this.onChange) this.onChange();
     return true;
   }
 
@@ -44,6 +47,7 @@ export class RoadNetwork {
     this.roads.delete(key);
 
     this._refreshNeighbors(gx, gz);
+    if (this.onChange) this.onChange();
     return true;
   }
 
@@ -93,13 +97,23 @@ export class RoadNetwork {
     data.mesh = mesh;
   }
 
+  /**
+   * One geometry per road part, shared by every tile. A tile's mesh is rebuilt whenever a
+   * neighbour is drawn or erased (and every tile on a preset or its undo), and each rebuild
+   * used to allocate its parts afresh and never dispose them: GPU geometries only ever grew.
+   */
+  _geo(key, make) {
+    const f = this.assetFactory;
+    return f && f._sharedGeo ? f._sharedGeo('road-' + key, make) : make();
+  }
+
   _createRoadSegment(n, s, e, w, ne, nw, se, sw) {
     const group = new THREE.Group();
     const size = this.tileSize;
     const half = size / 2;
 
     // Base Asphalt Square
-    const baseGeo = new THREE.PlaneGeometry(size, size);
+    const baseGeo = this._geo('base', () => new THREE.PlaneGeometry(size, size));
     const base = new THREE.Mesh(baseGeo, this.assetFactory.materials.asphalt);
     base.rotation.x = -Math.PI / 2;
     base.receiveShadow = true;
@@ -110,29 +124,31 @@ export class RoadNetwork {
     const curbHeight = 0.12;
     const curbThick = 0.45;
 
+    const curbGeoH = this._geo('curb-h', () => new THREE.BoxGeometry(size, curbHeight, curbThick));
+    const curbGeoV = this._geo('curb-v', () => new THREE.BoxGeometry(curbThick, curbHeight, size));
     if (!n) {
-      const curbN = new THREE.Mesh(new THREE.BoxGeometry(size, curbHeight, curbThick), curbMat);
+      const curbN = new THREE.Mesh(curbGeoH, curbMat);
       curbN.position.set(0, curbHeight / 2, -half + curbThick / 2);
       group.add(curbN);
     }
     if (!s) {
-      const curbS = new THREE.Mesh(new THREE.BoxGeometry(size, curbHeight, curbThick), curbMat);
+      const curbS = new THREE.Mesh(curbGeoH, curbMat);
       curbS.position.set(0, curbHeight / 2, half - curbThick / 2);
       group.add(curbS);
     }
     if (!w) {
-      const curbW = new THREE.Mesh(new THREE.BoxGeometry(curbThick, curbHeight, size), curbMat);
+      const curbW = new THREE.Mesh(curbGeoV, curbMat);
       curbW.position.set(-half + curbThick / 2, curbHeight / 2, 0);
       group.add(curbW);
     }
     if (!e) {
-      const curbE = new THREE.Mesh(new THREE.BoxGeometry(curbThick, curbHeight, size), curbMat);
+      const curbE = new THREE.Mesh(curbGeoV, curbMat);
       curbE.position.set(half - curbThick / 2, curbHeight / 2, 0);
       group.add(curbE);
     }
 
     // Diagonal Corner Connectors
-    const diagGeo = new THREE.PlaneGeometry(curbThick * 2, curbThick * 2);
+    const diagGeo = this._geo('diag', () => new THREE.PlaneGeometry(curbThick * 2, curbThick * 2));
     if (!n && !e && ne) {
       const corner = new THREE.Mesh(diagGeo, this.assetFactory.materials.asphalt);
       corner.rotation.x = -Math.PI / 2;
@@ -160,8 +176,8 @@ export class RoadNetwork {
 
     // Yellow / White Lane Markings
     const lineMat = this.assetFactory.materials.roadLine;
-    const lineGeoH = new THREE.PlaneGeometry(3.0, 0.28);
-    const lineGeoV = new THREE.PlaneGeometry(0.28, 3.0);
+    const lineGeoH = this._geo('line-h', () => new THREE.PlaneGeometry(3.0, 0.28));
+    const lineGeoV = this._geo('line-v', () => new THREE.PlaneGeometry(0.28, 3.0));
 
     const count = (n ? 1 : 0) + (s ? 1 : 0) + (e ? 1 : 0) + (w ? 1 : 0);
 
@@ -183,14 +199,14 @@ export class RoadNetwork {
         group.add(line);
       } else {
         // Corner turn: centered circular guide
-        const dot = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12), lineMat);
+        const dot = new THREE.Mesh(this._geo('dot-turn', () => new THREE.CircleGeometry(0.5, 12)), lineMat);
         dot.rotation.x = -Math.PI / 2;
         dot.position.y = 0.01;
         group.add(dot);
       }
     } else {
       // Intersection
-      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.6, 12), lineMat);
+      const dot = new THREE.Mesh(this._geo('dot-cross', () => new THREE.CircleGeometry(0.6, 12)), lineMat);
       dot.rotation.x = -Math.PI / 2;
       dot.position.y = 0.01;
       group.add(dot);
@@ -236,14 +252,23 @@ export class RoadNetwork {
     };
   }
 
-  clear() {
-    const count = this.roads.size;
-    this.roads.forEach(data => {
-      if (data.mesh) {
-        this.roadGroup.remove(data.mesh);
-      }
-    });
-    this.roads.clear();
+  /**
+   * Remove every road tile - or, with `keep`, every tile `keep(gx, gz)` does not hold on to -
+   * and return how many were removed. Tiles that stay are redrawn so they stop joining up
+   * with the ones that went.
+   */
+  clear(keep = null) {
+    let count = 0;
+    const kept = [];
+    for (const [key, data] of this.roads) {
+      if (keep && keep(data.gx, data.gz)) { kept.push(data); continue; }
+      if (data.mesh) this.roadGroup.remove(data.mesh);
+      this.roads.delete(key);
+      count++;
+    }
+    if (count) kept.forEach(d => this.updateTileMesh(d.gx, d.gz));
+    // Like addRoad/removeRoad: a cleared network is a city change that must be saved.
+    if (count && this.onChange) this.onChange();
     return count;
   }
 }
