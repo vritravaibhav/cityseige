@@ -1066,6 +1066,32 @@ if (!BR) {
   }
 }
 
+// ---------------------------------------------------------------- OAuth connections (ChatGPT)
+section('oauthRequests / oauthApprovals (OAuth connect screen)');
+{
+  const open = { clientId: 'csc_x', clientName: 'ChatGPT', redirectUri: 'https://chatgpt.com/cb', redirectHost: 'chatgpt.com',
+    state: 's', codeChallenge: 'c'.repeat(43), scope: 'city.design', resource: 'https://mcp.test/mcp', finishUrl: 'https://mcp.test/oauth/finish?req=r',
+    expiresAt: T(now() + 600 * SEC) };
+  await seed('oauthRequests/reqOpen', open);
+  await seed('oauthRequests/reqOld', { ...open, expiresAt: T(now() - 5 * SEC) });
+  await seed('oauthRequests/reqTaken', open);
+  await seed('oauthApprovals/reqTaken', { uid: B, approvedAt: T(now()) });
+  await deny('OAuth: signed-out read of a request', () => getDoc(doc(dbAnon, 'oauthRequests', 'reqOpen')));
+  await allow('OAuth: signed-in read of a request by id', () => getDoc(doc(dbA, 'oauthRequests', 'reqOpen')));
+  await deny('OAuth: list requests', () => getDocs(collection(dbA, 'oauthRequests')));
+  await deny('OAuth: a client creates a request', () => setDoc(doc(dbA, 'oauthRequests', 'mine'), open));
+  await deny('OAuth: approve as someone else', () => setDoc(doc(dbE, 'oauthApprovals', 'reqOpen'), { uid: A, approvedAt: serverTimestamp() }));
+  await deny('OAuth: approve with an extra key', () => setDoc(doc(dbA, 'oauthApprovals', 'reqOpen'), { uid: A, approvedAt: serverTimestamp(), scope: 'all' }));
+  await deny('OAuth: approve with a client-chosen time', () => setDoc(doc(dbA, 'oauthApprovals', 'reqOpen'), { uid: A, approvedAt: T(now()) }));
+  await deny('OAuth: approve an expired request', () => setDoc(doc(dbA, 'oauthApprovals', 'reqOld'), { uid: A, approvedAt: serverTimestamp() }));
+  await deny('OAuth: approve a request that does not exist', () => setDoc(doc(dbA, 'oauthApprovals', 'nope'), { uid: A, approvedAt: serverTimestamp() }));
+  await deny('OAuth: overwrite someone else\'s approval', () => setDoc(doc(dbA, 'oauthApprovals', 'reqTaken'), { uid: A, approvedAt: serverTimestamp() }));
+  await allow('OAuth: approve an open request as yourself', () => setDoc(doc(dbA, 'oauthApprovals', 'reqOpen'), { uid: A, approvedAt: serverTimestamp() }));
+  await deny('OAuth: read an approval', () => getDoc(doc(dbA, 'oauthApprovals', 'reqOpen')));
+  await deny('OAuth: read server-only clients', () => getDoc(doc(dbA, 'oauthClients', 'csc_x')));
+  await deny('OAuth: read server-only codes', () => getDoc(doc(dbA, 'oauthCodes', 'x')));
+}
+
 // ---------------------------------------------------------------- Shadow Duel (shared project)
 // City Siege shares shadow-duel-dark-2026's one free database with Shadow Duel, so firestore.rules
 // carries Shadow Duel's rules too. These pin their behaviour: a City Siege rules edit must never

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createCityServer } from './tools.js';
+import { AuthError, TOKEN_PREFIX } from './auth.js';
 
 /**
  * Streamable HTTP transport, stateless (spec section 10): every POST /mcp gets a fresh MCP
@@ -11,6 +12,12 @@ import { createCityServer } from './tools.js';
  * is nobody to act for. A header with a bad or revoked token is let through, and every tool call
  * then answers with the readable "Access denied" result - an MCP client shows that to the model
  * (and so to the player), where a bare 401 would only surface as "failed to connect".
+ *
+ * With OAuth on (PUBLIC_URL set, oauth.js) the server is also an OAuth 2.1 authorization server
+ * for clients such as ChatGPT: a request with no token gets 401 + a WWW-Authenticate challenge
+ * naming the protected-resource metadata, and an OAuth access token that is expired, rotated or
+ * revoked gets 401 error="invalid_token", so the client refreshes or signs in again instead of
+ * showing tool errors. Pasted game tokens (csk_...) keep the readable "Access denied" answers.
  *
  * The caller's address is the `source` the auth layer throttles unrecognised tokens by (auth.js).
  * Behind a reverse proxy / load balancer every request comes from the proxy, so set TRUST_PROXY=1:
@@ -78,15 +85,19 @@ export function bearerOf(req) {
   return m ? m[1] : null;
 }
 
-export function startHttpServer({ port, host, deps, info = {}, log = () => {}, trustProxy = false }) {
+// A pasted game token (it keeps the readable in-chat "Access denied" answers).
+const PASTED_TOKEN_RE = new RegExp('^' + TOKEN_PREFIX + '[A-Za-z0-9_-]{43}$');
+
+export function startHttpServer({ port, host, deps, info = {}, log = () => {}, trustProxy = false, oauth = null }) {
   let warnedProxy = false;
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://localhost');
     try {
       if (url.pathname === '/healthz') {
-        sendJson(res, 200, { ok: true, name: 'city-siege-mcp', version: deps.version, ...info });
+        sendJson(res, 200, { ok: true, name: 'city-siege-mcp', version: deps.version, oauth: !!oauth, ...info });
         return;
       }
+      if (oauth && await oauth.handle(req, res, url)) return;
       if (url.pathname !== '/mcp') {
         sendJson(res, 404, { error: 'Not found. The MCP endpoint is POST /mcp.' });
         return;
@@ -98,9 +109,26 @@ export function startHttpServer({ port, host, deps, info = {}, log = () => {}, t
       }
       const token = bearerOf(req);
       if (!token) {
-        sendJson(res, 401, rpcError(-32001, 'Missing "Authorization: Bearer <token>" header. Generate a City Siege access token ' +
-          'in the game (ACCOUNT -> AI Designer (MCP)) and add it as a header in your MCP client config.'));
+        sendJson(res, 401, rpcError(-32001, 'Missing "Authorization: Bearer <token>" header. ' + (oauth
+          ? 'Connect with OAuth (your MCP client signs you in to City Siege), or generate'
+          : 'Generate') + ' a City Siege access token in the game (ACCOUNT -> AI Designer (MCP)) and add it as a header in ' +
+          'your MCP client config.'), oauth ? { 'WWW-Authenticate': oauth.challenge() } : {});
         return;
+      }
+      if (oauth && !PASTED_TOKEN_RE.test(token)) {
+        // An OAuth token is checked here, at the HTTP level: a 401 is what makes the client refresh it.
+        try {
+          await deps.auth.authenticate(token, { source: clientAddress(req, trustProxy) });
+        } catch (e) {
+          if (!(e instanceof AuthError)) throw e;
+          if (e.code === 'AUTH_THROTTLED') {
+            sendJson(res, 429, rpcError(-32001, e.message), { 'Retry-After': String(e.retryAfterSec || 60) });
+          } else {
+            sendJson(res, 401, rpcError(-32001, e.message),
+              { 'WWW-Authenticate': oauth.challenge({ error: 'invalid_token', description: e.message }) });
+          }
+          return;
+        }
       }
       let body;
       try {

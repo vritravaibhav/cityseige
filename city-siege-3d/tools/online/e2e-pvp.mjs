@@ -247,7 +247,10 @@ try {
   await A.page.click('.ch-send');
   await waitFor(A, () => (citySiege.online.battles || []).some(v => v.phase === 'pending'), null, 15000, 'battle created');
   const battleId = await A.page.evaluate(() => citySiege.online.battles.find(v => v.phase === 'pending').id);
-  let bd = await battleDoc(battleId);
+  // The page shows the battle from its own pending write (latency compensation) a moment before the
+  // server has it: wait for the server copy instead of reading it once.
+  let bd = null;
+  for (let i = 0; i < 50 && !bd; i++) { bd = await battleDoc(battleId); if (!bd) await sleep(100); }
   check(bd && bd.mode === 'instant' && bd.designSeconds === 120 && bd.challenger === uidA && bd.opponent === uidB && bd.status === 'pending',
     `battles/${battleId}: instant, 120 s design, Alice -> Bob, pending`, bd && { mode: bd.mode, designSeconds: bd.designSeconds, status: bd.status });
   await waitFor(A, () => !!document.querySelector('#battles-main .battle-card.phase-pending'), null, 5000, 'pending card');
@@ -692,7 +695,10 @@ try {
   await A.page.click(`[data-token-row="${hash}"] [data-action="revoke-token"]`);
   await A.page.click(`[data-token-row="${hash}"] [data-action="confirm-revoke"]`);
   await waitFor(A, (h) => /REVOKED/.test(document.querySelector(`[data-token-row="${h}"]`)?.innerText || ''), hash, 8000, 'revoked row');
-  check((await db.doc('mcpTokens/' + hash).get()).data().revoked === true, 'Revoke -> YES, REVOKE: mcpTokens doc revoked:true');
+  // The row shows REVOKED from the page's own pending write; the server copy can lag a moment behind.
+  let revokedDoc = false;
+  for (let i = 0; i < 50 && !revokedDoc; i++) { revokedDoc = (await db.doc('mcpTokens/' + hash).get()).data().revoked === true; if (!revokedDoc) await sleep(100); }
+  check(revokedDoc, 'Revoke -> YES, REVOKE: mcpTokens doc revoked:true');
   await A.page.evaluate(() => document.querySelector('#mcp-token-list')?.scrollIntoView({ block: 'center' }));
   await shot(A, 'account-mcp-token-revoked');
   await sleep(2000);   // longer than this process's 1.5 s token cache

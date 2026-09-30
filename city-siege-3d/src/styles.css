@@ -2964,3 +2964,32 @@ textarea.online-input { resize: vertical; min-height: 54px; line-height: 1.4; }
   .btn-home-action { padding-top: 5px; padding-bottom: 5px; }
   .home-action-dock .btn-home-action:hover { transform: none; }
 }
+
+/* ===== CONNECT AN AI APP (OAuth approval, src/ui/ConnectUI.js) ===== */
+.connect-screen .shop-body { justify-content: center; }
+.connect-screen .shop-main { display: flex; justify-content: center; }
+.connect-wrap { width: 100%; max-width: 620px; margin: 8px auto 32px; }
+.connect-card { padding: 22px 24px; display: flex; flex-direction: column; gap: 12px; }
+.connect-card .online-wide { width: 100%; }
+.connect-app-icon { font-size: 40px; line-height: 1; }
+.connect-title { font-size: 20px; }
+.connect-title b { color: #b388ff; }
+.connect-account { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px;
+  border-radius: 10px; background: rgba(124, 77, 255, 0.08); border: 1px solid rgba(179, 136, 255, 0.28); font-size: 13px; flex-wrap: wrap; }
+.connect-perms { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.connect-perm-col { padding: 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); }
+.connect-perm-col ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--text-main, #e8f1f8); }
+.connect-perm-head { font-size: 11px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; }
+.connect-perm-head.is-can { color: #69f0ae; }
+.connect-perm-head.is-cannot { color: #ff8a80; }
+.connect-note { font-size: 12px; }
+.connect-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-top: 4px; }
+.connect-actions button { padding: 13px; font-size: 14px; font-weight: 800; }
+.connect-expires { font-size: 12px; text-align: center; }
+@media (max-width: 600px) {
+  .connect-perms { grid-template-columns: 1fr; }
+  .connect-card { padding: 16px; }
+}
+.mcp-steps { margin: 4px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.7; }
+.mcp-inline-copy { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: 4px; }
+.mcp-inline-copy code { padding: 2px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.35); }

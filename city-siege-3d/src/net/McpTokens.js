@@ -116,7 +116,10 @@ export class McpTokens {
       lastUsedAtMs: tsMs(x.lastUsedAt),
       uses: Number(x.uses) || 0,
       revoked: !!x.revoked,
-      scope: x.scope || 'design'
+      scope: x.scope || 'design',
+      // 'oauth' = an app that connected by signing in (ChatGPT...), not a pasted token.
+      kind: x.kind === 'oauth' ? 'oauth' : 'token',
+      appHost: x.kind === 'oauth' ? String(x.redirectHost || '') : ''
     };
   }
 

@@ -7,6 +7,7 @@ import { RateLimiter } from './rateLimit.js';
 import { CityStore } from './store.js';
 import { createCityServer } from './tools.js';
 import { startHttpServer } from './http.js';
+import { OAuthServer } from './oauth.js';
 
 /**
  * City Siege MCP server - lets an AI assistant DESIGN a player's city (and nothing else).
@@ -16,7 +17,8 @@ import { startHttpServer } from './http.js';
  *                                request from "Authorization: Bearer <token>"; GET /healthz
  *
  * Environment: CITY_SIEGE_TOKEN, FIREBASE_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS |
- * FIREBASE_SERVICE_ACCOUNT_JSON, FIRESTORE_EMULATOR_HOST, PORT, HOST, TRUST_PROXY. See ../README.md.
+ * FIREBASE_SERVICE_ACCOUNT_JSON, FIRESTORE_EMULATOR_HOST, PORT, HOST, TRUST_PROXY, and for OAuth
+ * (ChatGPT) PUBLIC_URL + GAME_URL [+ OAUTH_REDIRECT_HOSTS]. See ../README.md and ../../docs/CHATGPT.md.
  *
  * stdout belongs to the MCP protocol in stdio mode, so every log line goes to stderr.
  */
@@ -44,6 +46,11 @@ Environment:
   FIRESTORE_EMULATOR_HOST          dev: use the Firestore emulator (e.g. 127.0.0.1:8085)
   PORT, HOST                       HTTP listen address
   TRUST_PROXY=1                    HTTP behind a reverse proxy: caller address from X-Forwarded-For
+
+OAuth (HTTP only; lets ChatGPT and other OAuth MCP clients connect by signing in):
+  PUBLIC_URL                       this server's public https origin (e.g. https://mcp.example.com); turns OAuth on
+  GAME_URL                         where the game runs: players approve connections on its CONNECT screen
+  OAUTH_REDIRECT_HOSTS             optional comma list of allowed redirect hosts (e.g. chatgpt.com,claude.ai)
 `;
 
 function parseArgs(argv) {
@@ -71,7 +78,23 @@ async function main() {
   // Token checks are cached 30 s (spec); tests shorten it to watch a revoke bite.
   const envCache = (process.env.MCP_AUTH_CACHE_MS || '').trim();
   const cacheMs = envCache && Number(envCache) >= 0 ? Number(envCache) : 30000;
-  const auth = new TokenAuth(db, { cacheMs, log });
+  // OAuth (ChatGPT and other clients that sign in instead of taking a pasted token): HTTP only,
+  // on when PUBLIC_URL (this server's public https origin) is set.
+  const publicUrl = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  let oauth = null;
+  if (args.http && publicUrl) {
+    const gameUrl = (process.env.GAME_URL || '').trim();
+    if (!gameUrl) {
+      throw new Error('PUBLIC_URL is set (OAuth on) but GAME_URL is not: set GAME_URL to where the game runs ' +
+        '(e.g. https://play.example.com/ or http://localhost:3000/) - its CONNECT screen is where players approve a connection.');
+    }
+    const redirectHosts = (process.env.OAUTH_REDIRECT_HOSTS || '').split(',').map(h => h.trim()).filter(Boolean);
+    // Tests only: let a Client ID Metadata Document come from http:// or a private address (the
+    // suite serves one on 127.0.0.1). Never set this on a public server - it opens an SSRF hole.
+    const allowPrivateMetadata = /^(1|true|yes)$/i.test(String(process.env.OAUTH_ALLOW_PRIVATE_METADATA || '').trim());
+    oauth = new OAuthServer({ db, publicUrl, gameUrl, redirectHosts, allowPrivateMetadata, log });
+  }
+  const auth = new TokenAuth(db, { cacheMs, log, resource: oauth ? oauth.resource : null });
   const deps = { auth, store: new CityStore(db), limiter: new RateLimiter(), version: PKG.version, log };
 
   let closing = false;
@@ -90,8 +113,10 @@ async function main() {
     const host = args.host || process.env.HOST || '127.0.0.1';
     // Behind a reverse proxy the socket address is the proxy's: TRUST_PROXY=1 reads X-Forwarded-For.
     const trustProxy = /^(1|true|yes)$/i.test(String(process.env.TRUST_PROXY || '').trim());
-    await startHttpServer({ port, host, deps, info: { transport: 'http', project: projectId }, log, trustProxy });
+    await startHttpServer({ port, host, deps, info: { transport: 'http', project: projectId }, log, trustProxy, oauth });
     log(`HTTP transport on http://${host}:${port}/mcp (health: /healthz) - project ${projectId}, ${mode}`);
+    log(oauth ? `OAuth on: issuer ${oauth.issuer}, resource ${oauth.resource}, approvals at ${process.env.GAME_URL}`
+      : 'OAuth off (set PUBLIC_URL + GAME_URL to let ChatGPT and other OAuth clients connect)');
     return;
   }
 

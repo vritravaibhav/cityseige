@@ -674,10 +674,25 @@ export class OnlineUI {
       </div>`;
     const list = `
       <div class="blueprint-card online-card">
-        <div class="online-card-title">🗝️ Your tokens</div>
+        <div class="online-card-title">🗝️ Your tokens and connected apps</div>
         <div id="mcp-token-list"></div>
       </div>`;
-    return `<div class="online-stack online-stack-wide">${intro}${reveal || gen}${configs}${list}${prompts}</div>`;
+    this._copyTexts['chatgpt-url'] = cfg.serverUrl;
+    const chatgpt = `
+      <div class="blueprint-card online-card">
+        <div class="online-card-title">🌐 ChatGPT (and other apps that sign in) - no token needed</div>
+        <p class="online-dim">These apps connect with OAuth: they send you to a City Siege CONNECT screen, you press ALLOW, done. The connection then shows in the list below, where you can revoke it.</p>
+        <ol class="mcp-steps">
+          <li>ChatGPT → <b>Settings → Apps &amp; Connectors → Advanced settings</b> → turn on <b>Developer mode</b>.</li>
+          <li><b>Create</b> a connector. MCP Server URL:
+            <span class="mcp-inline-copy"><code id="copy-src-chatgpt-url" class="online-selectable">${esc(cfg.serverUrl)}</code>
+            <button class="btn-secondary mcp-copy-btn" data-action="copy" data-copy="chatgpt-url">COPY</button></span></li>
+          <li>Authentication: <b>OAuth</b>. Create, then <b>Connect</b>: ChatGPT sends you here to approve.</li>
+          <li>In a chat, turn the connector on and ask: “Call get_city, then fortify my city for tonight's battle.”</li>
+        </ol>
+        <p class="online-dim">The server must be reachable over https from the internet (docs/CHATGPT.md explains hosting and a quick tunnel for testing).</p>
+      </div>`;
+    return `<div class="online-stack online-stack-wide">${intro}${chatgpt}${reveal || gen}${configs}${list}${prompts}</div>`;
   }
 
   _renderReveal(cfg) {
@@ -722,7 +737,7 @@ export class OnlineUI {
     if (!box) return;
     const tokens = this.online.tokens || [];
     if (!tokens.length) {
-      box.innerHTML = '<div class="online-empty-line">No tokens yet. Generate one above to connect an AI.</div>';
+      box.innerHTML = '<div class="online-empty-line">No tokens or connected apps yet. Generate a token above, or connect ChatGPT.</div>';
       return;
     }
     const now = Date.now();
@@ -743,7 +758,8 @@ export class OnlineUI {
             <button class="btn-danger-soft token-btn" data-action="revoke-token" data-hash="${esc(t.hash)}">Revoke</button>`;
         }
         return `<div class="token-row ${t.revoked ? 'is-revoked' : ''}" data-token-row="${esc(t.hash)}">
-          <span class="token-label">${esc(t.label || 'AI designer')}<small>${esc(t.hash.slice(0, 8))}…</small></span>
+          <span class="token-label">${t.kind === 'oauth' ? '🔗 ' : ''}${esc(t.label || 'AI designer')}<small>${t.kind === 'oauth'
+            ? `signed in${t.appHost ? ' · ' + esc(t.appHost) : ''}` : esc(t.hash.slice(0, 8)) + '…'}</small></span>
           <span><small class="token-k">Created</small>${Number.isFinite(t.createdAtMs) ? fmtWhen(t.createdAtMs, now) : '-'}</span>
           <span><small class="token-k">Last used</small>${t.lastUsedAtMs ? fmtAgo(t.lastUsedAtMs, now) : 'never'}</span>
           <span><small class="token-k">Uses</small>${t.uses || 0}</span>

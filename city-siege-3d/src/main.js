@@ -19,6 +19,7 @@ import { readCitySave, restoreCity, saveCity, backupCitySave, CITY_SAVE_KEY } fr
 import { formatDuration } from './data/progression.js';
 import { OnlineController } from './net/OnlineController.js';
 import { OnlineUI } from './ui/OnlineUI.js';
+import { ConnectUI } from './ui/ConnectUI.js';
 
 class GameApp {
   constructor() {
@@ -217,6 +218,8 @@ class GameApp {
     // ACCOUNT + BATTLES screens, the account pill and the design banner (they work offline too:
     // the screens then explain how to turn online play on).
     this.onlineUI = new OnlineUI({ game: this, ui: this.uiManager, online: this.online });
+    // CONNECT: an AI app (ChatGPT) sent the player here with ?oauth_request=<id> to approve it.
+    this.connectUI = new ConnectUI({ game: this, ui: this.uiManager, online: this.online, onlineUI: this.onlineUI });
 
     // Start Main Loop
     this.animate = this.animate.bind(this);

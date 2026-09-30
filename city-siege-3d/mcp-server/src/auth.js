@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { RateLimiter } from './rateLimit.js';
+import { parseGrantToken, sameHash } from './oauth.js';
 
 /**
  * Personal access tokens (spec section 10, "Auth").
@@ -95,8 +96,10 @@ export class TokenAuth {
    * @param {{cacheMs?: number, usageEveryMs?: number, missLimits?: {source: number, global: number},
    *   now?: () => number, log?: (msg: string) => void}} opts
    */
-  constructor(db, { cacheMs = 30000, usageEveryMs = 60000, missLimits = MISS_LIMITS, now = () => Date.now(), log = () => {} } = {}) {
+  constructor(db, { cacheMs = 30000, usageEveryMs = 60000, missLimits = MISS_LIMITS, now = () => Date.now(), log = () => {}, resource = null } = {}) {
     this.db = db;
+    // OAuth access tokens are only good for the resource they were issued for (<PUBLIC_URL>/mcp).
+    this.resource = resource;
     this.cacheMs = cacheMs;
     // An unknown token is re-checked sooner: the player may have just created it.
     this.missCacheMs = Math.min(cacheMs, 5000);
@@ -123,6 +126,8 @@ export class TokenAuth {
       throw new AuthError('No City Siege access token was given. Generate one ' + WHERE + ', then set it as ' +
         'CITY_SIEGE_TOKEN (stdio) or send it as "Authorization: Bearer <token>" (HTTP) in your MCP client config.', 'MISSING_TOKEN');
     }
+    const grant = parseGrantToken(token);
+    if (grant) return this._authenticateGrant(grant, source);
     if (!TOKEN_RE.test(token)) {
       throw new AuthError(`That access token does not look like a City Siege token (they start with "${TOKEN_PREFIX}" and are ` +
         '47 characters long). Copy it again from ' + WHERE.replace('in the game: ', 'the game\'s ') + ' - it is shown only once, so ' +
@@ -146,6 +151,45 @@ export class TokenAuth {
       throw new AuthError('This access token is not linked to a player. Generate a new one ' + WHERE + '.', 'UNKNOWN_TOKEN');
     }
     return { uid: data.uid, hash, label: data.label || '', writerId: 'mcp:' + hash.slice(0, 8) };
+  }
+
+  /**
+   * An OAuth access token ('cso_<grantId>.<secret>', oauth.js): the grant doc is found by id and
+   * its current access-secret hash compared in constant time. A refresh rotates the secret, so a
+   * cached doc that does not match (or looks expired) is read once more before refusing.
+   */
+  async _authenticateGrant(grant, source) {
+    const again = 'Reconnect the app to City Siege (it signs you in again).';
+    if (grant.kind !== 'access') {
+      throw new AuthError('That is a refresh token; send the access token as the Bearer token. ' + again, 'INVALID_TOKEN');
+    }
+    const check = (g) => {
+      if (!g || g.kind !== 'oauth') return 'UNKNOWN_TOKEN';
+      if (g.revoked === true) return 'REVOKED_TOKEN';
+      if (!sameHash(grant.secretHash, g.accessHash)) return 'INVALID_TOKEN';
+      if (!g.accessExpiresAt || g.accessExpiresAt.toMillis() <= this.now()) return 'EXPIRED_TOKEN';
+      return null;
+    };
+    let data = await this._lookup(grant.grantId, sourceKey(source));
+    let why = check(data);
+    if (why === 'INVALID_TOKEN' || why === 'EXPIRED_TOKEN') {
+      data = await this._read(grant.grantId, sourceKey(source), null, this.now());
+      why = check(data);
+    }
+    const text = {
+      UNKNOWN_TOKEN: 'This connection to City Siege no longer exists (it was deleted in the game). ' + again,
+      REVOKED_TOKEN: `This connection${data && data.label ? ` ("${data.label}")` : ''} was revoked in City Siege. ` + again,
+      INVALID_TOKEN: 'This access token is not valid any more (a newer one was issued). Refresh it, or ' + again.toLowerCase(),
+      EXPIRED_TOKEN: 'This access token expired. Refresh it, or ' + again.toLowerCase()
+    };
+    if (why) throw new AuthError(text[why], why);
+    if (this.resource && data.resource && data.resource !== this.resource) {
+      throw new AuthError(`This token was issued for ${data.resource}, not this server (${this.resource}). ` + again, 'WRONG_RESOURCE');
+    }
+    if (data.scope !== 'design' || typeof data.uid !== 'string' || !data.uid) {
+      throw new AuthError('This connection is not linked to a player. ' + again, 'UNKNOWN_TOKEN');
+    }
+    return { uid: data.uid, hash: grant.grantId, label: data.label || '', writerId: 'mcp:' + grant.grantId.slice(0, 8), oauth: true };
   }
 
   /** The token doc (cached), or null when it does not exist. */

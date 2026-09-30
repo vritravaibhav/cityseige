@@ -246,6 +246,7 @@ Online play is an optional layer on top of the offline game: **accounts** (Fireb
 | Online play locally, no real project | `npm run emulators` in one terminal (needs the Firebase CLI and Java), `npm run dev:emu` in another, open `http://localhost:3101` |
 | Online play for real | Create a Firebase project, deploy `firestore.rules` + indexes, put the web config in `.env.local`: step by step in [`docs/ONLINE.md`](docs/ONLINE.md#setup-from-zero-a-real-firebase-project) |
 | The AI designer | Generate a token in the game (ACCOUNT → AI Designer (MCP)) and connect Claude: [`docs/MCP.md`](docs/MCP.md) |
+| ChatGPT | Add City Siege as a ChatGPT connector and approve it on the game's CONNECT screen (OAuth, no token): [`docs/CHATGPT.md`](docs/CHATGPT.md) |
 
 ### Battles in one paragraph
 

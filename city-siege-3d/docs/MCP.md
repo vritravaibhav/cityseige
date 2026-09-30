@@ -168,6 +168,14 @@ A request without the header gets HTTP 401 with instructions. A request with a w
 token is answered normally, and every tool call returns "Access denied (UNKNOWN_TOKEN): ..." so the
 reason shows up in the chat instead of as a vague connection failure.
 
+### ChatGPT and other apps that sign in (OAuth)
+
+Apps that cannot take a pasted token connect with OAuth instead: the hosted server (with
+`PUBLIC_URL` and `GAME_URL` set) is also an OAuth 2.1 authorization server, and players approve the
+app on the game's CONNECT screen. No token to copy; the connection shows in ACCOUNT -> AI Designer
+and is revoked there. Step-by-step for ChatGPT, hosting and a quick tunnel for testing:
+[CHATGPT.md](CHATGPT.md).
+
 ## Hosting the HTTP server
 
 One server instance serves every player: each request carries its own token. The server needs
@@ -711,6 +719,10 @@ AI keeps editing.
 | `HOST` | HTTP | Bind address, default `127.0.0.1` (`--host` overrides; Docker uses `0.0.0.0`). |
 | `MCP_AUTH_CACHE_MS` | both | Token check cache, default 30000. |
 | `TRUST_PROXY` | HTTP | `1` behind one reverse proxy or load balancer (Cloud Run): the caller's address, which unknown-token throttling counts by, is then the last `X-Forwarded-For` entry. Off by default (the socket address). |
+| `PUBLIC_URL` | HTTP | Turns OAuth on (ChatGPT): the server's public https origin, no trailing slash. It is the OAuth issuer; tokens are bound to `<PUBLIC_URL>/mcp`. See [CHATGPT.md](CHATGPT.md). |
+| `GAME_URL` | HTTP + OAuth | Where the game runs (same Firebase project); players approve connections on its CONNECT screen. Required with `PUBLIC_URL`. |
+| `OAUTH_REDIRECT_HOSTS` | HTTP + OAuth | Optional comma list of redirect hosts apps may register (e.g. `chatgpt.com,claude.ai`). |
+| `OAUTH_ALLOW_PRIVATE_METADATA` | tests only | Lets a client metadata document come from `http://` or a private address. Never on a public server. |
 
 With none of the credential variables set, the server uses Google application default credentials
 (for example Cloud Run's service identity). It refuses a `demo-*` project unless

@@ -323,6 +323,27 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
+    // ================================================================ OAuth connections (mcp-server/src/oauth.js)
+    // An AI app (ChatGPT) asks the MCP server to connect; the server parks the request in
+    // oauthRequests/{id} (Admin SDK) and sends the player's browser to the game's CONNECT screen,
+    // which reads it by its unguessable id and, on ALLOW, writes oauthApprovals/{id} = { uid }.
+    // That write is the whole proof of who approved: Firebase Auth, checked here. The first
+    // approval wins (no update), and only while the request is still open. oauthClients and
+    // oauthCodes are server-only (no match = denied).
+    match /oauthRequests/{reqId} {
+      allow get: if signedIn();
+      allow list, write: if false;
+    }
+    match /oauthApprovals/{reqId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'approvedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.approvedAt == request.time
+        && exists(/databases/$(database)/documents/oauthRequests/$(reqId))
+        && get(/databases/$(database)/documents/oauthRequests/$(reqId)).data.expiresAt > request.time;
+      allow read, update, delete: if false;
+    }
+
     // ================================================================ battles/{battleId}
     // Readable only by the two players; list queries must filter `players array-contains uid`.
     // Every update is exactly one of the transitions below, each whitelisting the keys it

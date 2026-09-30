@@ -23,6 +23,7 @@ This README is for running and testing the server. The player guide, with the fu
 - [Running it: HTTP (hosted) or stdio (local)](#running-it-http-hosted-or-stdio-local)
 - [Connect Claude Code](#connect-claude-code)
 - [Connect Claude Desktop](#connect-claude-desktop)
+- [Connect ChatGPT (OAuth)](#connect-chatgpt-oauth)
 - [Environment variables](#environment-variables)
 - [Tools and prompts](#tools-and-prompts)
 - [Coordinates and the map](#coordinates-and-the-map)
@@ -172,6 +173,24 @@ Keep `Authorization:${CITY_SIEGE_AUTH}` without a space; the space goes inside t
 Any other MCP host works the same way. For stdio, run `node .../mcp-server/src/index.js` with
 `CITY_SIEGE_TOKEN` set. For HTTP, point the host at `https://<host>/mcp` and send the Bearer header.
 
+## Connect ChatGPT (OAuth)
+
+ChatGPT (and other MCP clients that sign in) cannot take a pasted token. Run the HTTP server with
+`PUBLIC_URL` (its public https origin) and `GAME_URL` (where the game runs) and it also becomes an
+OAuth 2.1 authorization server (`src/oauth.js`): ChatGPT discovers it from the 401 on `/mcp`,
+registers itself (client metadata document or dynamic registration), sends the player to the game's
+CONNECT screen to press ALLOW, and gets short-lived access tokens (`cso_...`, 1 h) plus rotating
+refresh tokens (`csr_...`, 60 days). The connection is an `mcpTokens` doc of kind `oauth`, listed and
+revocable in the game like a token. Pasted `csk_` tokens keep working unchanged.
+
+```bash
+PUBLIC_URL=https://mcp.example.com GAME_URL=https://play.example.com/ \
+GOOGLE_APPLICATION_CREDENTIALS=~/.config/city-siege/key.json TRUST_PROXY=1 npm run start:http
+```
+
+Step by step (including a quick `cloudflared` tunnel from your own computer):
+[../docs/CHATGPT.md](../docs/CHATGPT.md).
+
 ## Environment variables
 
 | Variable | Used by | Meaning |
@@ -185,6 +204,10 @@ Any other MCP host works the same way. For stdio, run `node .../mcp-server/src/i
 | `HOST` | HTTP | Bind address. Default `127.0.0.1`; the Docker image uses `0.0.0.0`. `--host` overrides it. |
 | `MCP_AUTH_CACHE_MS` | both | How long token checks are cached. Default 30000. Tests lower it. |
 | `TRUST_PROXY` | HTTP | `1` behind one reverse proxy / load balancer (Cloud Run): the caller's address, which unknown-token throttling is counted by, is then the last `X-Forwarded-For` entry. Off by default (the socket address). |
+| `PUBLIC_URL` | HTTP | Turns OAuth on: the server's public https origin (issuer; tokens are bound to `<PUBLIC_URL>/mcp`). |
+| `GAME_URL` | HTTP + OAuth | Where the game runs; players approve apps on its CONNECT screen. Required with `PUBLIC_URL`. |
+| `OAUTH_REDIRECT_HOSTS` | HTTP + OAuth | Optional allowlist of app redirect hosts, e.g. `chatgpt.com,claude.ai`. |
+| `OAUTH_ALLOW_PRIVATE_METADATA` | tests only | Lets a client metadata document come from `http://` / a private address. Never in production. |
 
 With none of the three credential options set, the server falls back to Google's application
 default credentials (for example Cloud Run's service identity). It refuses a `demo-*` project
@@ -342,6 +365,9 @@ npm run emulators            # auth 127.0.0.1:9099, firestore 127.0.0.1:8085
 
 # 2. the MCP end-to-end suite (from city-siege-3d/)
 node mcp-server/test/run.mjs # or: npm run test:mcp  /  cd mcp-server && npm test
+
+# 3. the OAuth suite (ChatGPT's way in; project demo-cs-oauth, port 8841-8843)
+node mcp-server/test/oauth.mjs   # or: npm run test:oauth
 ```
 
 `test/run.mjs` uses its own project, `demo-cs-mcp` (`MCP_TEST_PROJECT_ID` overrides it), and

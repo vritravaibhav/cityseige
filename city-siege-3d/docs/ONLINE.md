@@ -7,6 +7,7 @@ fully offline, exactly as before, and never downloads the Firebase SDK.
 
 Related docs: [BATTLES.md](BATTLES.md) (the rules players see), [MCP.md](MCP.md) (the AI
 designer), [`mcp-server/README.md`](../mcp-server/README.md) (running the MCP server),
+[CHATGPT.md](CHATGPT.md) (connecting ChatGPT with OAuth),
 [ONLINE_SPEC.md](ONLINE_SPEC.md) (the engineering contract and its deviations log, section 13).
 
 - [Architecture](#architecture)
@@ -185,6 +186,22 @@ designer's bank credits this bank has already been paid (see [Bank credits](#ban
 is the SHA-256 (64 lowercase hex) of the raw token; the token itself is never stored. The owner
 can create, get/list their own, rename, revoke (never un-revoke) and delete. `lastUsedAt` and
 `uses` are written only by the MCP server.
+
+An app connected with OAuth (ChatGPT, [CHATGPT.md](CHATGPT.md)) is one doc here too, written by the
+MCP server: id = a random 64-hex grant id, `kind: 'oauth'`, `label` = the app's name, plus
+`clientId`, `clientName`, `redirectHost`, `resource`, and SHA-256 hashes of the current access and
+refresh secrets with their expiry (`accessHash`, `accessExpiresAt`, `refreshHash`, `refreshExpiresAt`,
+`prevRefreshHash`, `rotatedAt`). The game lists it as "🔗 <app> · signed in"; Revoke / Delete work
+the same as for a token.
+
+### OAuth collections (`oauthClients`, `oauthRequests`, `oauthApprovals`, `oauthCodes`)
+
+Used only while an app connects (`mcp-server/src/oauth.js`, [CHATGPT.md](CHATGPT.md#how-it-works)).
+`oauthClients/{clientId}` (registered apps), `oauthCodes/{sha256}` (one-time codes, 5 min) and the
+writes to `oauthRequests/{id}` (a parked authorization request, 10 min) are server-only. A signed-in
+player may **get** an `oauthRequests` doc by its unguessable id (the CONNECT screen), and create
+`oauthApprovals/{id}` = `{ uid: <own uid>, approvedAt: serverTimestamp() }` once, while that request
+is open. Nothing else is readable or writable by clients.
 
 ### `battles/{battleId}`
 
@@ -510,14 +527,15 @@ What is already set up (2026-09-30):
 | Piece | State |
 |---|---|
 | Web app | `city-siege (web)`, app id `1:891020100166:web:380e42c27b0a089f508047` |
-| Config | `city-siege-3d/.env.production.local` (git-ignored), read by `npm run build` and `npm run dev:live` only |
+| Config | `city-siege-3d/.env.local` (git-ignored), read by `npm run dev` and `npm run build` |
 | Rules + indexes | deployed (`npm run deploy:rules`); `.firebaserc` alias `prod` |
 | Authentication | **not enabled yet** - see below |
 | MCP server | not hosted yet (needs a service account key and a Node host) |
 
-`npm run dev` and your port-3100 server stay **offline** (no `.env.local`), so the smoke, raidbot and
-parity tools never touch the real project. `npm run dev:live` (port 3102) serves the game against
-the real project.
+`npm run dev` and `npm run build` use the real project. `npm run dev:emu` (`.env.emulator`) and
+`npm run dev:offline` (`.env.offline`, port 3100) override `.env.local`, because Vite's mode files
+beat it: run the smoke, raidbot and parity tools against `npm run dev:offline` so they never touch
+the real project. Restart Vite after changing any `.env*` file.
 
 Still to do, in the Firebase console (Authentication was never initialized on this project):
 
@@ -630,12 +648,8 @@ npm run dev:emu
 - Browser sign-ups always land in the auth emulator's default project (`demo-city-siege`, the one
   `emulators:start --project` names), whatever `VITE_FIREBASE_PROJECT_ID` says; Firestore data does
   follow the project id. Tests that share one emulator should use unique emails.
-- Offline mode while a `.env.local` exists: Vite loads `.env.local` in every mode, and shell
-  variables win over `.env` files, so blank the key for that run:
-
-  ```bash
-  VITE_FIREBASE_API_KEY= VITE_FIREBASE_EMULATORS=false npx vite --port 3100 --strictPort
-  ```
+- Offline mode while a `.env.local` exists: `npm run dev:offline` (port 3100). Its committed
+  `.env.offline` blanks the API key, and a mode file wins over `.env.local`.
 
 ## Testing
 
@@ -646,6 +660,8 @@ npm run dev:emu
 | `npm run test:shared` | nothing | `cityRules` + `battleRules` unit tests (void battles, early resolve, production clock, undo output settlement, reach / roads / coverage), ids in `CityPersistence`, `BattleService` views on a fake clock (the next-deadline timer, where a started raid is) | 457 passed |
 | `npm run test:sync` | nothing | the rebase (`src/net/cityMerge.js`): purchases, jobs, levels, collects and replayed roads/moves/stows/placements survive a newer cloud city, an AI move wins, a stow credit for output already banked here is held back, the stow-credit ledger pays each credit once past 100, nothing is minted or lost (300 + 3,000 randomised cases with full accounting), the bank merge | 71 passed |
 | `npm run test:rules` | Firestore emulator | every allowed and denied write in `firestore.rules`, full instant and scheduled flows, trophy ticks bound to a settled battle, void, lock grace, challenge cooldown, rules constants = `battleRules.js`, the `writers` / `credited` lists, the shared Shadow Duel block unchanged | 463 passed |
+| `npm run test:oauth` | Firestore emulator | the OAuth server end to end: metadata (RFC 9728 / 8414), 401 challenges, DCR and client metadata documents (with an SSRF guard), PKCE, iss, resource binding, one-time codes, refresh rotation with a 2 min retry grace, expiry, revoke in the game and via RFC 7009, pasted tokens unchanged - and the official MCP SDK client doing the whole flow by itself with both registration methods | 60 passed |
+| `PW_CORE=... GAME_URL=http://localhost:3176/ FIREBASE_PROJECT_ID=demo-cs-oauth-e2e npm run test:e2e:oauth [-- shotsDir]` | both emulators, emulator-mode Vite for the same project | "Connect ChatGPT" in Chrome through the real CONNECT screen: ALLOW back to the app with code + state + iss, token exchange, the app's edits live in the open game, the connection listed and revoked in ACCOUNT, DENY, the signed-out path through ACCOUNT sign-in, an expired link, phone layout | 22 PASS |
 | `npm run test:mcp` (or `cd mcp-server && npm test`) | Firestore emulator | every MCP tool over stdio and HTTP, all refusal codes, tokens, unknown-token throttling (per address and /64, the process cap and its quiet lane), rate limits, the 413 body cap, battle lock, undo (with the output of what it takes off the map), paid vs pending credits, the production clock, rules cross-check | 300 passed |
 | `npm run test:online` | Firebase CLI, **no emulators running** | the four suites above inside `firebase emulators:exec` (starts and stops its own emulators) | |
 | `PW_CORE=... GAME_URL=http://localhost:3100/ node tools/e2e/smoke.mjs [shotsDir]` | offline Vite, Chrome, playwright-core | the whole game in a real browser | 171 PASS |
@@ -701,8 +717,8 @@ Game (read by Vite from `.env.local` or `.env.emulator`; restart Vite after a ch
 
 MCP server: `CITY_SIEGE_TOKEN`, `FIREBASE_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS` or
 `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIRESTORE_EMULATOR_HOST`, `PORT`, `HOST`, `MCP_AUTH_CACHE_MS`,
-`TRUST_PROXY`.
-See [MCP.md](MCP.md#environment-variables).
+`TRUST_PROXY`, and for OAuth (ChatGPT) `PUBLIC_URL`, `GAME_URL`, `OAUTH_REDIRECT_HOSTS`.
+See [MCP.md](MCP.md#environment-variables) and [CHATGPT.md](CHATGPT.md#hosting-it-for-real).
 
 ## Troubleshooting
 

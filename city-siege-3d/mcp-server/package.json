@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/index.js",
     "start:http": "node src/index.js --http",
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "test:oauth": "node test/oauth.mjs"
   },
   "engines": {
     "node": ">=20"

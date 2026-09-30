@@ -105,7 +105,11 @@ import { BATTLE, schedulePresets, isNightAt, battlePhase } from '../shared/battl
  *   startAttempt, submitResult, resolveIfDue, settle}
  *
  * AI designer (MCP) tokens
- *   TokenRow = { hash, label, createdAtMs, lastUsedAtMs, uses, revoked, scope }
+ *   TokenRow = { hash, label, createdAtMs, lastUsedAtMs, uses, revoked, scope, kind: 'token'|'oauth', appHost }
+ *     kind 'oauth' = an app connected by signing in (ChatGPT...): revoke/delete work the same
+ *   getOAuthRequest(id)                            -> Promise<null | { id, clientName, redirectHost, finishUrl,
+ *                                                     expiresAtMs }>   the CONNECT screen's request (null = gone)
+ *   approveOAuthRequest(id)                        -> Promise<finishUrl>  records "I approve" (rules check who)
  *   generateToken(label)                          -> Promise<{ token, hash, label }>  token shown ONCE
  *   listTokens()                                  -> Promise<TokenRow[]>
  *   revokeToken(hash) / deleteToken(hash)         -> Promise
@@ -542,6 +546,49 @@ export class OnlineController {
       throw codedError('failed-precondition', started.message || 'That city cannot be raided.');
     }
     return prep;
+  }
+
+  // ---------------------------------------------------------------- OAuth connect (ChatGPT etc.)
+
+  /**
+   * The connection request an AI app parked with the MCP server (mcp-server/src/oauth.js), read by
+   * its unguessable id for the CONNECT screen. null when it is gone (used, cancelled, expired).
+   */
+  async getOAuthRequest(id) {
+    await this.init();
+    if (!this.fb || !/^[A-Za-z0-9_-]{32}$/.test(String(id || ''))) return null;
+    const { doc, getDoc } = this.fb.fsSdk;
+    const snap = await getDoc(doc(this.fb.db, 'oauthRequests', id));
+    if (!snap.exists()) return null;
+    const r = snap.data();
+    let finishUrl = null;
+    try {
+      const u = new URL(String(r.finishUrl || ''));
+      if (u.protocol === 'https:' || u.protocol === 'http:') finishUrl = u.toString();
+    } catch { /* not a URL: treated as gone below */ }
+    if (!finishUrl) return null;
+    return {
+      id,
+      clientName: String(r.clientName || 'An AI app').slice(0, 60),
+      redirectHost: String(r.redirectHost || '').slice(0, 200),
+      finishUrl,
+      expiresAtMs: r.expiresAt && r.expiresAt.toMillis ? r.expiresAt.toMillis() : 0
+    };
+  }
+
+  /** ALLOW on the CONNECT screen: oauthApprovals/{id} = { uid }. Resolves to the URL to go to next. */
+  async approveOAuthRequest(id) {
+    const req = await this.getOAuthRequest(id);
+    if (!req) throw codedError('not-found', 'This connection request expired or was already used. Start again from your AI app.');
+    const uid = this.user && this.user.uid;
+    if (!uid) throw codedError('unauthenticated', 'Sign in first.');
+    const { doc, setDoc, serverTimestamp } = this.fb.fsSdk;
+    try {
+      await setDoc(doc(this.fb.db, 'oauthApprovals', id), { uid, approvedAt: serverTimestamp() });
+    } catch (e) {
+      throw friendlyError(e);
+    }
+    return req.finishUrl;
   }
 
   // ---------------------------------------------------------------- MCP tokens glue
