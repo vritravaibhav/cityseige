@@ -7,6 +7,53 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 
 /**
+ * The night raid look (scheduled battles after dark, ONLINE_SPEC section 8). Only the recon and
+ * combat views ever wear it; the day values are captured from the scene as built, so going back
+ * to 'day' restores exactly the look every screen has always had.
+ *
+ * Night has to READ as night and still be a playable raid: the moon keeps the key light's
+ * direction (shadows still rake across the streets) at a fraction of the sun, a blue hemisphere
+ * stands in for the image-based light (r160 has no environmentIntensity, so the env map is simply
+ * off - with it the metal still glowed like noon), and the exposure drops. Bloom rises and its
+ * threshold falls so windows, neon, sirens and the buggy's plasma rounds glow against the dark;
+ * the alarm light loses its falloff so the siren wash actually reaches the streets.
+ *
+ * Readability comes from the hemisphere, not the moon. A raid entered from the North Gate drives
+ * TOWARD the moon, so every wall the player sees is backlit and lit only by the hemisphere: with a
+ * near-black ground colour (0x10161f x1.7) two thirds of the target walls and cops beside the buggy
+ * rendered below luma 20/255. Walls take half their hemisphere light from the ground colour and
+ * the ground plane none, so a brighter ground 'bounce' lifts the buildings and cars while the grass
+ * stays dark; the moon is kept low, because it is what lights the grass (and at ~2.9 it pushes white
+ * walls past the bloom threshold). The dark fog also starts further out, so the far side of the city
+ * (165 m across) is still there to pick targets from.
+ */
+const NIGHT = {
+  hemiSky: 0x5a6fae,
+  hemiGround: 0x3a4868,
+  hemiIntensity: 4.0,
+  reconFill: 1.0,          // the satellite map's sky fill and moon x these. At this exposure the
+  reconMoon: 1.0,          // combat values already give a scan as bright as it always was, and equal
+                           // values mean no brightness jump when the night swoop hands over to combat
+  moonColor: 0xa9bcff,
+  moonIntensity: 1.9,
+  exposure: 0.95,
+  background: 0x03060d,
+  fogColor: 0x060a14,
+  combatFogNear: 90,
+  combatFogFar: 300,
+  reconFogNear: 260,
+  reconFogFar: 760,
+  bloomStrength: 0.9,
+  bloomRadius: 0.55,
+  bloomThreshold: 0.6,
+  alarmDecay: 0,
+  alarmDistance: 140,
+  alarmGain: 0.14,
+  starCount: 1600,
+  skyRadius: 380
+};
+
+/**
  * SceneManager - Sets up Three.js scene, cameras, lighting, shadows,
  * city ground grid, and rendering pipeline.
  */
@@ -47,6 +94,13 @@ export class SceneManager {
 
     // Post-processing chain (needs activeCamera, so it comes after _initCameras)
     this._initComposer();
+
+    // Raid lighting theme ('day' | 'night'): stored by setRaidTheme, applied by setCameraMode.
+    this.raidTheme = 'day';
+    this._appliedTheme = 'day';
+    this._alarmGain = 1;
+    this.nightSky = null;   // stars + moon, built on the first night raid
+    this._dayLook = this._captureLook();
 
     // Resize listener
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -153,6 +207,14 @@ export class SceneManager {
     // Mouse wheel / Trackpad pinch zoom (PREVENT BROWSER ZOOMING THE DOM!)
     window.addEventListener('wheel', (e) => {
       if (this.activeCamera === this.builderCamera) {
+        // The builder camera stays active behind every full screen (SHOP, GARAGE, BATTLES,
+        // ACCOUNT) and modal, so a wheel / two-finger swipe over one of them must scroll it,
+        // not zoom the hidden city. Only a pinch (ctrlKey) is still swallowed there, so the
+        // browser never zooms the DOM.
+        if (e.target && e.target.closest && e.target.closest('.shop-screen, .modal-backdrop, #inspector-modal')) {
+          if (e.ctrlKey) e.preventDefault();
+          return;
+        }
         e.preventDefault();
         const factor = e.ctrlKey ? 3 : 5;
         const deltaZoom = Math.sign(e.deltaY) * factor;
@@ -387,7 +449,130 @@ export class SceneManager {
     }
     const flash = Math.sin(elapsed * 10);
     this.alarmLight.color.setHex(flash > 0 ? 0xff0044 : 0x0066ff);
-    this.alarmLight.intensity = 2.5 + Math.abs(flash) * 3.0;
+    // _alarmGain is 1 by day; the night theme turns the falloff off and scales this down.
+    this.alarmLight.intensity = (2.5 + Math.abs(flash) * 3.0) * this._alarmGain;
+  }
+
+  /**
+   * Choose the raid lighting: 'day' (every practice raid, day battles) or 'night' (a night
+   * battle). It is applied by setCameraMode for recon and combat - which rewrites the atmosphere
+   * on every switch, so a theme set any other way would be overwritten - and setCameraMode
+   * ('builder') always goes back to day. Set mid-raid, it takes effect at once.
+   */
+  setRaidTheme(theme) {
+    this.raidTheme = theme === 'night' ? 'night' : 'day';
+    if (this.activeCamera !== this.builderCamera) {
+      const view = this.activeCamera === this.reconCamera ? 'recon' : 'combat';
+      this._applyTheme(this.raidTheme, view);
+      this._setSkyMood(false);
+      this.scene.fog = this._raidFog(view);
+    }
+  }
+
+  /** Everything the night theme changes, as the scene has it now (captured once, in daylight). */
+  _captureLook() {
+    return {
+      hemiSky: this.hemiLight.color.getHex(),
+      hemiGround: this.hemiLight.groundColor.getHex(),
+      hemiIntensity: this.hemiLight.intensity,
+      sunColor: this.sunLight.color.getHex(),
+      sunIntensity: this.sunLight.intensity,
+      environment: this.scene.environment,
+      exposure: this.renderer.toneMappingExposure,
+      bloomStrength: this.bloomPass ? this.bloomPass.strength : 0,
+      bloomRadius: this.bloomPass ? this.bloomPass.radius : 0,
+      bloomThreshold: this.bloomPass ? this.bloomPass.threshold : 0,
+      alarmDecay: this.alarmLight.decay,
+      alarmDistance: this.alarmLight.distance
+    };
+  }
+
+  /** `view` ('recon' | 'combat') only matters at night: the recon map gets more moon and sky fill. */
+  _applyTheme(theme, view = 'combat') {
+    const night = theme === 'night';
+    const key = night ? `night:${view}` : 'day';
+    if (key === this._appliedTheme) return;
+    this._appliedTheme = key;
+    const d = this._dayLook;
+    this.hemiLight.color.setHex(night ? NIGHT.hemiSky : d.hemiSky);
+    this.hemiLight.groundColor.setHex(night ? NIGHT.hemiGround : d.hemiGround);
+    this.hemiLight.intensity = night ? NIGHT.hemiIntensity * (view === 'recon' ? NIGHT.reconFill : 1) : d.hemiIntensity;
+    this.sunLight.color.setHex(night ? NIGHT.moonColor : d.sunColor);
+    this.sunLight.intensity = night ? NIGHT.moonIntensity * (view === 'recon' ? NIGHT.reconMoon : 1) : d.sunIntensity;
+    this.scene.environment = night ? null : d.environment;
+    this.renderer.toneMappingExposure = night ? NIGHT.exposure : d.exposure;
+    if (this.bloomPass) {
+      this.bloomPass.strength = night ? NIGHT.bloomStrength : d.bloomStrength;
+      this.bloomPass.radius = night ? NIGHT.bloomRadius : d.bloomRadius;
+      this.bloomPass.threshold = night ? NIGHT.bloomThreshold : d.bloomThreshold;
+    }
+    this.alarmLight.decay = night ? NIGHT.alarmDecay : d.alarmDecay;
+    this.alarmLight.distance = night ? NIGHT.alarmDistance : d.alarmDistance;
+    this._alarmGain = night ? NIGHT.alarmGain : 1;
+    if (night) this._ensureNightSky();
+    if (this.nightSky) this.nightSky.visible = night;
+  }
+
+  /** Fog for a raid view under the current theme (the day values are the ones it always had). */
+  _raidFog(view) {
+    if (this.raidTheme !== 'night') return view === 'combat' ? new THREE.Fog(0x1a2634, 160, 340) : null;
+    return view === 'combat'
+      ? new THREE.Fog(NIGHT.fogColor, NIGHT.combatFogNear, NIGHT.combatFogFar)
+      : new THREE.Fog(NIGHT.fogColor, NIGHT.reconFogNear, NIGHT.reconFogFar);
+  }
+
+  /**
+   * Stars and a moon for the night sky. Built once and kept (toggled with the theme), so night
+   * raids never add GPU resources after the first. The dome is re-centred on the camera every
+   * frame (render), so it always sits inside the far plane, and it ignores fog.
+   */
+  _ensureNightSky() {
+    if (this.nightSky) return;
+    const group = new THREE.Group();
+    group.name = 'night_sky';
+
+    const n = NIGHT.starCount;
+    const pos = new Float32Array(n * 3);
+    // Deterministic scatter over the upper hemisphere, denser toward the horizon like a real sky.
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    for (let i = 0; i < n; i++) {
+      const az = rnd() * Math.PI * 2;
+      const el = Math.asin(0.04 + rnd() * 0.96);
+      pos[i * 3] = Math.cos(el) * Math.cos(az) * NIGHT.skyRadius;
+      pos[i * 3 + 1] = Math.sin(el) * NIGHT.skyRadius;
+      pos[i * 3 + 2] = Math.cos(el) * Math.sin(az) * NIGHT.skyRadius;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const stars = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xd6e0ff, size: 1.8, sizeAttenuation: false, fog: false,
+      transparent: true, opacity: 0.85, depthWrite: false
+    }));
+    stars.frustumCulled = false;
+    group.add(stars);
+
+    // The moon sits where the key light comes from, so the shadows agree with it.
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, 'rgba(245,248,255,1)');
+    grad.addColorStop(0.36, 'rgba(225,234,255,1)');
+    grad.addColorStop(0.42, 'rgba(170,190,255,0.35)');
+    grad.addColorStop(1, 'rgba(120,140,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const moonTex = new THREE.CanvasTexture(c);
+    moonTex.colorSpace = THREE.SRGBColorSpace;
+    const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: moonTex, fog: false, depthWrite: false, transparent: true }));
+    moon.position.copy(this.sunLight.position).normalize().multiplyScalar(NIGHT.skyRadius * 0.95);
+    moon.scale.setScalar(46);
+    group.add(moon);
+
+    group.visible = false;
+    this.nightSky = group;
+    this.scene.add(group);
   }
 
   /**
@@ -516,22 +701,34 @@ export class SceneManager {
 
   _setSkyMood(isDaylight) {
     if (this.sky) this.sky.visible = isDaylight;
-    this.scene.background = isDaylight ? null : this.nightBackdrop;
+    if (isDaylight) {
+      this.scene.background = null;
+    } else if (this.raidTheme === 'night') {
+      if (!this.nightBackground) this.nightBackground = new THREE.Color(NIGHT.background);
+      this.scene.background = this.nightBackground;
+    } else {
+      this.scene.background = this.nightBackdrop;
+    }
   }
 
   setCameraMode(mode) {
     if (mode === 'builder') {
       this.activeCamera = this.builderCamera;
       this.scene.fog = null; // Always 100% clear for home and city builder!
+      // The builder is always daylight, whatever the last raid was.
+      this.raidTheme = 'day';
+      this._applyTheme('day');
       this._setSkyMood(true);
     } else if (mode === 'recon') {
       this.activeCamera = this.reconCamera;
-      this.scene.fog = null;
+      this._applyTheme(this.raidTheme, 'recon');
+      this.scene.fog = this._raidFog('recon');
       this._setSkyMood(false);
       this.setDesignGridVisible(false);
     } else if (mode === 'combat') {
       this.activeCamera = this.combatCamera;
-      this.scene.fog = new THREE.Fog(0x1a2634, 160, 340);
+      this._applyTheme(this.raidTheme, 'combat');
+      this.scene.fog = this._raidFog('combat');
       this._setSkyMood(false);
       this.setDesignGridVisible(false);
     }
@@ -612,6 +809,8 @@ export class SceneManager {
   }
 
   render() {
+    // The night sky dome travels with the camera, so it never falls outside the far plane.
+    if (this.nightSky && this.nightSky.visible) this.nightSky.position.copy(this.activeCamera.position);
     if (this.composer) {
       this.renderPass.camera = this.activeCamera;
       this.composer.render();

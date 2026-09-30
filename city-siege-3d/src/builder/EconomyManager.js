@@ -17,8 +17,18 @@ export class EconomyManager {
   static get MAX_SPARE_LIVES() { return SPARE_LIFE.max; }   // plus AttackManager's 3 base lives
   /** Price of one spare life for a Town Hall `th` city (progression.spareLifeCostFor). */
   static lifeCostFor(th) { return spareLifeCostFor(th); }
+  /**
+   * The bank a brand-new player starts with (the constructor's defaults, without reading the save).
+   * The online layer resets to it when an account whose cloud bank is missing is loaded onto a
+   * device that held another account's save.
+   */
+  static starterBank() {
+    const e = new EconomyManager({ load: false });
+    return { cash: e.cash, iron: e.iron, wood: e.wood, gems: e.gems, vehicleLives: e.vehicleLives };
+  }
 
-  constructor() {
+  /** @param {{load?: boolean}} [opts] load: false builds the first-run defaults only (no localStorage). */
+  constructor({ load = true } = {}) {
     this.cash = 1500;
     this.iron = 800;
     this.wood = 1000;
@@ -58,7 +68,7 @@ export class EconomyManager {
     // re-applied after load() whenever the road key was missing, and consumeFromInventory
     // deletes a key at zero - so spending the last road tile handed out 35 free roads on
     // every reload. Defaults are never topped up post-load now.
-    this.load();
+    if (load) this.load();
   }
 
   // No passive live ticking into bank - resources accumulate inside factories!

@@ -1,0 +1,23 @@
+{
+  "name": "city-siege-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server that lets an AI assistant design (and only design) a City Siege player's city.",
+  "type": "module",
+  "bin": {
+    "city-siege-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "start:http": "node src/index.js --http",
+    "test": "node test/run.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "firebase-admin": "^13.10.0",
+    "zod": "^3.25.76"
+  }
+}

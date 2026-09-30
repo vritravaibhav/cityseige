@@ -2632,6 +2632,100 @@ const placeFromInventory = (type, gx, gz) => page.evaluate(({ type, gx, gz }) =>
     'an old save\'s starter stock over the TH1 limits (140 / 130 roads, 3 / 2 spike traps) is trimmed and refunded', legacy);
 }
 
+// ================================================================ full-screen wheel, landscape home dock, night raid light
+{
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => localStorage.clear());
+  await boot();
+
+  // The builder camera stays active behind every full screen: the wheel over SHOP (or GARAGE,
+  // BATTLES, ACCOUNT) zoomed the hidden city and the screen never scrolled with a mouse/trackpad.
+  const wheelOn = async (x, y, n, dy) => { await page.mouse.move(x, y); for (let i = 0; i < n; i++) { await page.mouse.wheel(0, dy); await page.waitForTimeout(60); } await page.waitForTimeout(350); };
+  await page.evaluate(() => { citySiege.sceneManager.setZoom(68); citySiege.uiManager.setScreen('SHOP'); });
+  await page.waitForTimeout(600);
+  const s0 = await page.evaluate(() => { const m = document.querySelector('#shop-view .shop-main'); return { top: m.scrollTop, sh: m.scrollHeight, ch: m.clientHeight, zoom: citySiege.sceneManager.builderZoom }; });
+  await wheelOn(700, 500, 6, 200);
+  const s1 = await page.evaluate(() => ({ top: document.querySelector('#shop-view .shop-main').scrollTop, zoom: citySiege.sceneManager.builderZoom }));
+  check(s0.sh > s0.ch && s1.top > s0.top && s1.zoom === s0.zoom, 'the mouse wheel scrolls the SHOP screen and leaves the hidden city\'s zoom alone', { s0, s1 });
+  await page.evaluate(() => citySiege.uiManager.setScreen('HOME'));
+  await page.waitForTimeout(500);
+  const z0 = await page.evaluate(() => citySiege.sceneManager.builderZoom);
+  await wheelOn(760, 380, 3, 200);
+  const z1 = await page.evaluate(() => citySiege.sceneManager.builderZoom);
+  check(z1 > z0, 'the mouse wheel over the HOME map still zooms the city', { z0, z1 });
+  await page.evaluate(() => citySiege.sceneManager.setZoom(68));
+
+  // Landscape phones: the fifth dock button (BATTLES) pushed DESIGN MAP off a 390 px screen, and the
+  // account pill pushed the sound toggle (at 667 px the pill itself) off the right edge.
+  const reach = {};
+  for (const [w, h] of [[844, 390], [667, 375], [740, 360]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(400);
+    reach[`${w}x${h}`] = await page.evaluate(() => ['btn-attack-city', 'btn-open-battles', 'btn-open-garage', 'btn-open-shop', 'btn-open-design', 'btn-account', 'btn-toggle-sound'].filter(id => {
+      const el = document.getElementById(id), r = el.getBoundingClientRect();
+      const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !(r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && t && (t === el || el.contains(t)));
+    }));
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(400);
+  check(Object.values(reach).every(bad => bad.length === 0), 'landscape phones: every home dock button, the account pill and the sound toggle are on screen and tappable', reach);
+
+  // Night battle raid, chase camera 12 m and 25 m inside the North Gate looking into the city -
+  // TOWARD the moon, so every wall is backlit (and no buggy yet, so no headlight: the hard case).
+  // Rendered pixels of the arena's buildings, masked by a flat-white render of that group alone.
+  // The upper quartile is the lit walls (the lower half is spike traps and steel legs, dark by day
+  // too). The old night had p75 10 / 86% of target pixels below luma 20 at +12 m; day is 75 / 37%.
+  const snap = await (await fetch(new globalThis.URL('/tools/online/fixtures/th5-city.cloud.json', URL))).json();
+  const night = await page.evaluate(async (snap) => {
+    const g = citySiege, am = g.attackManager, sm = g.sceneManager, sc = sm.scene;
+    const r = am.startBattleRaid({ battle: { id: 'smoke-night' }, snapshot: snap, opponentName: 'Night', theme: 'night', onAttemptStart() {}, onResult() { return true; } });
+    if (!r.ok) return { refused: r };
+    await new Promise(res => setTimeout(res, 1200));
+    const gl = sm.renderer.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, px = new Uint8Array(W * H * 4);
+    const grab = () => { sm.render(); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px); return px.slice(); };
+    const luma = (a, i) => 0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2];
+    sm.setCameraMode('combat');
+    const gate = am.buildings.getMainGates().find(b => b.name === 'North Gate') || am.buildings.getMainGates()[0];
+    const gp = gate.mesh.position, len = Math.hypot(gp.x, gp.z), inX = -gp.x / len, inZ = -gp.z / len;
+    const out = {};
+    for (const d of [12, 25]) {
+      sm.combatCamera.position.set(gp.x + inX * d, 8, gp.z + inZ * d);
+      sm.combatCamera.lookAt(gp.x + inX * (d + 30), 2, gp.z + inZ * (d + 30));
+      sm.combatCamera.updateMatrixWorld();
+      const group = am.arena.buildings.buildingGroup, keep = new Set();
+      for (let o = group; o && o !== sc; o = o.parent) keep.add(o);
+      const vis = sc.children.map(c => c.visible), saved = { bg: sc.background, fog: sc.fog, bloom: sm.bloomPass.strength };
+      sc.children.forEach(c => { c.visible = keep.has(c); });
+      sc.overrideMaterial = new (sm.ground.material.constructor)({ color: 0x000000, emissive: 0xffffff, roughness: 1, metalness: 0 });
+      sc.background = null; sc.fog = null; sm.bloomPass.strength = 0;
+      const mask = grab();
+      sc.children.forEach((c, i) => { c.visible = vis[i]; });
+      sc.overrideMaterial = null; sc.background = saved.bg; sc.fog = saved.fog; sm.bloomPass.strength = saved.bloom;
+      const stats = () => {
+        const img = grab(), v = []; let all = 0, n = 0;
+        for (let i = 0; i < img.length; i += 16) { const L = luma(img, i); all += L; n++; if (luma(mask, i) > 128) v.push(L); }
+        v.sort((a, b) => a - b);
+        return { p75: Math.round(v[Math.floor(v.length * 0.75)]), below20: +(v.filter(x => x < 20).length / v.length).toFixed(2), frame: Math.round(all / n), px: v.length };
+      };
+      const nightStats = stats();
+      sm.setRaidTheme('day');
+      out[`+${d}m`] = { night: nightStats, day: stats() };
+      sm.setRaidTheme('night');
+    }
+    sm.setCameraMode('recon');
+    am.abortRecon();
+    await new Promise(res => setTimeout(res, 600));
+    out.back = { screen: g.uiManager.currentScreen, exposure: sm.renderer.toneMappingExposure };
+    return out;
+  }, snap);
+  const views = night.refused ? [] : [night['+12m'], night['+25m']];
+  check(views.length === 2 && views.every(v => v.night.px > 5000 && v.night.p75 >= 40 && v.night.below20 <= 0.6),
+    'night raid from the North Gate (facing the moon): target walls are lit, not silhouettes (upper-quartile luma >= 40, at most 60% of target pixels below 20)', night);
+  check(views.length === 2 && views.every(v => v.night.frame <= v.day.frame * 0.8) && night.back.screen === 'HOME' && night.back.exposure === 1,
+    'the night raid frame is still clearly darker than the same view by day, and ABORT RECON brings daylight back', night);
+}
+
 check(errors.length === 0, 'no page errors', errors);
 await browser.close();
 console.log(fails ? `\n${fails} FAILED` : '\nSMOKE SUITE PASSES');

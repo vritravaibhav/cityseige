@@ -1,0 +1,687 @@
+rules_version = '2';
+
+// =====================================================================================
+// City Siege 3D - Firestore security rules (contract: docs/ONLINE_SPEC.md section 6)
+//
+// TRUST MODEL - read this before changing anything below.
+//
+// * There is no server-side game simulation (no Cloud Functions, Spark plan). The browser
+//   plays the raid and reports its score, so a modified client CAN lie about how well it
+//   raided. These rules do not pretend otherwise. What they DO guarantee:
+//     - ownership: you only ever write your own profile, city, save, tokens, and only your
+//       own key inside a shared battle document;
+//     - shape: every document has exactly the documented keys, with sane types and ranges
+//       (a result's stars must equal starsFor(percentage), the percentage must match
+//       destroyed/total, durations and sizes are capped);
+//     - timing: every battle transition happens in its phase, measured with the SERVER
+//       clock (request.time) - challenges expire, cities lock at startAt, attempts only
+//       start in the fight window, late results are refused;
+//     - one attempt and one result per player per battle, never rewritten;
+//     - integrity of the locked city: a snapshot must be byte-equal to the owner's live
+//       cities/{uid} layout at the moment it is taken, so nobody can hand the opponent a
+//       fake easy city to raid (either player may take it - the equality is the proof);
+//     - a deterministic winner: `winnerOf` below recomputes the verdict from the stored
+//       results, so a resolver cannot crown themselves; a battle nobody raided is 'void';
+//     - trophies move only in settle-sized steps: one W/L/D counter tick per write, and
+//       that tick must be the settle of one finished battle in the same transaction
+//       (players.lastSettled names it; the battle's settled flag flips in that same write),
+//       for the counter its recorded winner gives this player;
+//     - commander names are unique: a profile name needs the matching usernames claim;
+//     - battle ids are plain [A-Za-z0-9_-] (they end up in the BATTLES screen's markup), and
+//       one player sends at most one challenge per CHALLENGE_COOLDOWN (players.lastChallengeAt,
+//       and players.lastChallengeId names the ONE battle that stamp was spent on).
+//   What they CANNOT force: a player to settle at all. A loser whose client never settles
+//   keeps their trophies (no server process exists to settle for them).
+// * A city is locked by the first snapshot written at/after startAt. Its OWNER's game (after
+//   flushing its last edits) or the MCP server locks it at once; the opponent's game may lock
+//   it only LOCK_GRACE after startAt (an owner who is offline), so it never copies a city the
+//   owner was still saving. Edits that land between startAt and that write are part of the
+//   lock: there is no server process to freeze a city at an exact instant.
+// * The MCP server is the only other writer. It uses the Admin SDK, which bypasses these
+//   rules by design; it validates every layout edit with src/shared/cityRules.js instead
+//   and is the only writer of cities/{uid}/history and of mcpTokens usage fields.
+// * Timestamps the rules compare against request.time are written with serverTimestamp()
+//   (equality `== request.time`). Times a client must choose itself (startAt, fightEndsAt,
+//   snapshot lockedAt) are Timestamp.fromMillis() values accepted within TIME_SLACK of the
+//   server clock.
+// * Anything not matched below is denied.
+// =====================================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== BATTLE CONSTANTS - must equal BATTLE in src/shared/battleRules.js =====
+    // tools/online/test-firestore-rules.mjs parses every `function NAME() { return X; }`
+    // line in this block and fails if any value drifts from the JS module.
+    function INSTANT_DESIGN_OPTIONS() { return [0, 120, 300, 600]; }
+    function INSTANT_RESPOND_SECONDS() { return 600; }
+    function INSTANT_FIGHT_SECONDS() { return 900; }
+    function SCHEDULED_MIN_LEAD_SECONDS() { return 600; }
+    function SCHEDULED_MAX_LEAD_SECONDS() { return 604800; }
+    function SCHEDULED_FIGHT_SECONDS() { return 3600; }
+    function SCHEDULED_ACCEPT_BEFORE_SECONDS() { return 60; }
+    function RESULT_GRACE_SECONDS() { return 660; }
+    function RAID_TIME_LIMIT_SECONDS() { return 600; }
+    function TROPHY_WIN() { return 30; }
+    function TROPHY_LOSS() { return -20; }
+    function TROPHY_DRAW() { return 5; }
+    function MESSAGE_MAX() { return 140; }
+    function TIME_SLACK_SECONDS() { return 120; }
+    function CHALLENGE_COOLDOWN_SECONDS() { return 10; }
+    function LOCK_GRACE_SECONDS() { return 15; }
+    // ===== END BATTLE CONSTANTS =====
+
+    // Other caps (spec section 6).
+    function MAX_CITY_BUILDINGS() { return 400; }
+    function MAX_CITY_ROADS() { return 450; }
+    function MAX_TOWN_HALL() { return 12; }
+
+    // ---------------------------------------------------------------- helpers
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function secs(n) { return duration.value(n, 's'); }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function uint(v) { return v is int && v >= 0; }
+    function nonNeg(v) { return v is number && v >= 0; }
+    function thOk(v) { return v is int && v >= 1 && v <= MAX_TOWN_HALL(); }
+    // A client-chosen timestamp (Timestamp.fromMillis) that must be "now" give or take the
+    // clock tolerance. serverTimestamp() values pass too (they ARE request.time).
+    function nearNow(t) {
+      return t is timestamp
+        && t >= request.time - secs(TIME_SLACK_SECONDS())
+        && t <= request.time + secs(TIME_SLACK_SECONDS());
+    }
+    // Commander names: 3..20 of [A-Za-z0-9_ -], already trimmed (no edge spaces).
+    function validName(n) {
+      return n is string && n.matches('^[A-Za-z0-9_ -]{3,20}$') && !n.matches('^ .*|.* $');
+    }
+    function validNameLower(n) {
+      return n is string && n.matches('^[a-z0-9_ -]{3,20}$') && !n.matches('^ .*|.* $');
+    }
+
+    // ================================================================ players/{uid}
+    // Public profile. Anyone signed in may read (search, scouting, battle cards).
+    match /players/{uid} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && playerShapeOk(uid)
+        && request.resource.data.trophies == 0
+        && request.resource.data.wins == 0
+        && request.resource.data.losses == 0
+        && request.resource.data.draws == 0
+        && nameClaimedBy(uid);
+      allow update: if isOwner(uid) && playerShapeOk(uid)
+        && changed().hasOnly(['name', 'nameLower', 'townHall', 'trophies', 'wins', 'losses', 'draws', 'lastSeen',
+                              'lastSettled', 'lastChallengeAt', 'lastChallengeId'])
+        && recordStepOk(uid, resource.data, request.resource.data)
+        // Only ever "now": the battles create rule reads it as the time of the last challenge.
+        && (!('lastChallengeAt' in changed()) || request.resource.data.lastChallengeAt == request.time)
+        // The battle a stamp was spent on: it only moves together with a new stamp.
+        && (!('lastChallengeId' in changed()) || request.resource.data.lastChallengeAt == request.time)
+        // Renaming needs the new usernames/{nameLower} claim in the same batch/transaction
+        // (getAfter) or already committed - that is what makes names unique.
+        && (!changed().hasAny(['name', 'nameLower']) || nameClaimedBy(uid));
+      allow delete: if false;
+    }
+
+    function playerShapeOk(uid) {
+      let d = request.resource.data;
+      return d.keys().hasAll(['uid', 'name', 'nameLower', 'townHall', 'trophies', 'wins', 'losses', 'draws', 'createdAt'])
+        && d.keys().hasOnly(['uid', 'name', 'nameLower', 'townHall', 'trophies', 'wins', 'losses', 'draws', 'createdAt', 'lastSeen',
+                             'lastSettled', 'lastChallengeAt', 'lastChallengeId'])
+        && d.uid == uid
+        && validName(d.name) && d.nameLower == d.name.lower()
+        && thOk(d.townHall)
+        && uint(d.trophies) && uint(d.wins) && uint(d.losses) && uint(d.draws)
+        && d.createdAt is timestamp
+        && (!('lastSeen' in d) || d.lastSeen is timestamp)
+        && (!('lastSettled' in d) || (d.lastSettled is string && d.lastSettled.matches('^[A-Za-z0-9_-]{1,64}$')))
+        && (!('lastChallengeAt' in d) || d.lastChallengeAt is timestamp)
+        && (!('lastChallengeId' in d) || (d.lastChallengeId is string && d.lastChallengeId.matches('^[A-Za-z0-9_-]{1,64}$')));
+    }
+
+    function nameClaimedBy(uid) {
+      return getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.nameLower)).data.uid == uid;
+    }
+
+    // Trophies/W/L/D only move the way BattleService.settle moves them: at most one counter
+    // ticks up by one per write, and the trophy change is exactly that outcome's delta
+    // (a loss floors at 0). No tick -> trophies and lastSettled unchanged. A tick must be the
+    // settle of the battle named by lastSettled, in the same transaction (settledTickOk).
+    // createdAt/uid never change (they are outside the affectedKeys whitelist above).
+    function recordStepOk(uid, o, d) {
+      let dw = d.wins - o.wins;
+      let dl = d.losses - o.losses;
+      let dd = d.draws - o.draws;
+      return dw >= 0 && dl >= 0 && dd >= 0 && dw + dl + dd <= 1
+        && (dw + dl + dd == 0
+          ? d.trophies == o.trophies && !('lastSettled' in changed())
+          : settledTickOk(uid, d, dw == 1 ? 'wins' : (dd == 1 ? 'draws' : 'losses'))
+            && (dw == 1 ? d.trophies == o.trophies + TROPHY_WIN()
+              : dd == 1 ? d.trophies == o.trophies + TROPHY_DRAW()
+              : d.trophies == (o.trophies + TROPHY_LOSS() > 0 ? o.trophies + TROPHY_LOSS() : 0)));
+    }
+    // The battle a W/L/D tick settles: finished, with this player, whose settled flag for this
+    // player was absent before this write and is set by it (so one battle ticks once), and
+    // whose recorded winner gives this player exactly the counter that ticked.
+    function settledTickOk(uid, d, field) {
+      let before = get(/databases/$(database)/documents/battles/$(d.lastSettled)).data;
+      let after = getAfter(/databases/$(database)/documents/battles/$(d.lastSettled)).data;
+      return after.status == 'finished'
+        && uid in after.players
+        && !(uid in before.settled)
+        && after.settled.get(uid, false) == true
+        && (after.winner == 'draw' ? field == 'draws'
+          : after.winner == uid ? field == 'wins'
+          : after.winner != 'void' && field == 'losses');
+    }
+
+    // ================================================================ usernames/{nameLower}
+    // Uniqueness: create only when absent (an existing doc makes the write an update, which
+    // is denied), so two players racing for one name get exactly one winner. A claim can only
+    // be released once the owner's profile no longer carries that name (after this write), so
+    // nobody can free "alice" while still showing as Alice and let a second Alice in.
+    match /usernames/{nameLower} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && validNameLower(nameLower)
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid
+        && (!existsAfter(/databases/$(database)/documents/players/$(request.auth.uid))
+          || getAfter(/databases/$(database)/documents/players/$(request.auth.uid)).data.nameLower != nameLower);
+    }
+
+    // ================================================================ cities/{uid}
+    // Opponents may scout (read). Only the owner's game writes here through the rules; each
+    // write bumps rev by exactly one so CloudSync and the MCP server detect every race.
+    match /cities/{uid} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && cityShapeOk(uid)
+        && request.resource.data.rev == 1
+        && nearNow(request.resource.data.updatedAt)
+        && (!('lastChange' in request.resource.data) || lastChangeOk(request.resource.data.lastChange));
+      allow update: if isOwner(uid) && cityShapeOk(uid)
+        && changed().hasOnly(['name', 'townHall', 'rev', 'updatedAt', 'updatedBy', 'writerId', 'writers', 'layout', 'holdings', 'lastChange'])
+        && request.resource.data.rev == resource.data.rev + 1
+        && (!('updatedAt' in changed()) || nearNow(request.resource.data.updatedAt))
+        && (!('lastChange' in changed()) || lastChangeOk(request.resource.data.lastChange));
+      allow delete: if false;
+
+      // Previous versions, written only by the MCP server (Admin SDK) for undo.
+      match /history/{rev} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    function cityShapeOk(uid) {
+      let d = request.resource.data;
+      return d.keys().hasAll(['uid', 'name', 'townHall', 'rev', 'updatedAt', 'updatedBy', 'writerId', 'layout', 'holdings'])
+        && d.keys().hasOnly(['uid', 'name', 'townHall', 'rev', 'updatedAt', 'updatedBy', 'writerId', 'writers', 'layout', 'holdings', 'lastChange'])
+        && d.uid == uid
+        && d.name is string && d.name.size() <= 40
+        && thOk(d.townHall)
+        && d.rev is int
+        && d.updatedAt is timestamp
+        && d.updatedBy == 'game'
+        && d.writerId is string && d.writerId.size() >= 1 && d.writerId.size() <= 100
+        && writersOk(d)
+        && layoutOk(d.layout)
+        && holdingsOk(d.holdings);
+    }
+
+    function layoutOk(l) {
+      return l is map
+        && l.keys().hasAll(['v', 'buildings', 'tasks', 'roads'])
+        && l.keys().hasOnly(['v', 'savedAt', 'buildings', 'tasks', 'roads'])
+        && l.v == 1
+        && (!('savedAt' in l) || l.savedAt is number)
+        && l.buildings is list && l.buildings.size() <= MAX_CITY_BUILDINGS()
+        && l.tasks is list && l.tasks.size() <= MAX_CITY_BUILDINGS()
+        && l.roads is list && l.roads.size() <= MAX_CITY_ROADS();
+    }
+
+    function holdingsOk(h) {
+      return h is map
+        && h.keys().hasOnly(['inventory', 'stowedCounts', 'stowedLevels', 'stowedSealed', 'bankCredits'])
+        && (!('inventory' in h) || h.inventory is map)
+        && (!('stowedCounts' in h) || h.stowedCounts is map)
+        && (!('stowedLevels' in h) || h.stowedLevels is map)
+        && (!('stowedSealed' in h) || h.stowedSealed is map)
+        && (!('bankCredits' in h) || h.bankCredits is map);
+    }
+
+    // The game only ever signs its own changes; 'mcp' entries come from the Admin SDK.
+    function lastChangeOk(c) {
+      return c is map
+        && c.keys().hasAll(['by', 'summary'])
+        && c.keys().hasOnly(['by', 'summary', 'at'])
+        && c.by == 'game'
+        && c.summary is string && c.summary.size() <= 200
+        && (!('at' in c) || c.at is timestamp || c.at is number);
+    }
+
+    // ================================================================ saves/{uid}
+    // Bank + garage: private to the owner.
+    // `credited` lists the MCP stow credits (cities/{uid}.holdings.bankCredits ids) this bank has
+    // already been paid, so a credit is paid once per account however many devices see it
+    // (CloudSync writes it in the same transaction as the bank).
+    match /saves/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && saveShapeOk();
+      allow update: if isOwner(uid) && saveShapeOk()
+        && changed().hasOnly(['bank', 'garage', 'updatedAt', 'credited', 'writers']);
+      allow delete: if isOwner(uid);
+    }
+
+    function saveShapeOk() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['bank', 'garage', 'updatedAt', 'credited', 'writers'])
+        && (!('bank' in d) || bankOk(d.bank))
+        && (!('garage' in d) || d.garage is map)
+        && (!('updatedAt' in d) || d.updatedAt is timestamp)
+        && (!('credited' in d) || (d.credited is list && d.credited.size() <= 100))
+        && writersOk(d);
+    }
+
+    // `writers`: the tokens of the doc's latest game writes (CloudSync keeps 8), so a write whose
+    // reply was lost is recognised when the doc is read again instead of being applied twice.
+    function writersOk(d) {
+      return !('writers' in d) || (d.writers is list && d.writers.size() <= 8);
+    }
+
+    function bankOk(b) {
+      return b is map
+        && b.keys().hasOnly(['cash', 'iron', 'wood', 'gems', 'vehicleLives'])
+        && (!('cash' in b) || nonNeg(b.cash))
+        && (!('iron' in b) || nonNeg(b.iron))
+        && (!('wood' in b) || nonNeg(b.wood))
+        && (!('gems' in b) || nonNeg(b.gems))
+        && (!('vehicleLives' in b) || uint(b.vehicleLives));
+    }
+
+    // ================================================================ mcpTokens/{sha256hex}
+    // The doc id is the SHA-256 of the raw token (never stored). The owner creates, lists,
+    // labels, revokes and deletes; usage fields (lastUsedAt, uses) are Admin-SDK only.
+    match /mcpTokens/{hash} {
+      allow get, list: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn() && hash.matches('^[0-9a-f]{64}$')
+        && request.resource.data.keys().hasAll(['uid', 'label', 'createdAt', 'revoked', 'scope'])
+        && request.resource.data.keys().hasOnly(['uid', 'label', 'createdAt', 'revoked', 'scope'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.revoked == false
+        && request.resource.data.scope == 'design'
+        && request.resource.data.label is string && request.resource.data.label.size() <= 40
+        && nearNow(request.resource.data.createdAt);
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+        && changed().hasOnly(['revoked', 'label'])
+        && changed().size() > 0
+        // A revoked token stays revoked.
+        && (!('revoked' in changed()) || request.resource.data.revoked == true)
+        && (!('label' in changed()) || (request.resource.data.label is string && request.resource.data.label.size() <= 40));
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ================================================================ battles/{battleId}
+    // Readable only by the two players; list queries must filter `players array-contains uid`.
+    // Every update is exactly one of the transitions below, each whitelisting the keys it
+    // may touch; nothing else about a battle can ever change.
+    match /battles/{battleId} {
+      allow get, list: if signedIn() && request.auth.uid in resource.data.players;
+      // The id is rendered into the BATTLES screen: plain characters only (auto-ids are 20
+      // alphanumerics), so a modified client cannot smuggle markup in through it.
+      allow create: if signedIn() && battleId.matches('^[A-Za-z0-9_-]{1,64}$') && battleCreateOk(battleId);
+      allow update: if signedIn() && request.auth.uid in resource.data.players
+        && (acceptOk() || declineOk() || cancelOk() || readyOk() || snapshotOk()
+          || attemptOk() || resultOk() || resolveOk() || settleOk(battleId));
+      allow delete: if false;
+    }
+
+    // ---- create (challenger)
+    function battleCreateOk(battleId) {
+      let d = request.resource.data;
+      let common = ['mode', 'theme', 'status', 'challenger', 'opponent', 'players', 'names', 'townHalls',
+                    'createdAt', 'ready', 'snapshots', 'attempts', 'results', 'settled'];
+      let instantKeys = common.concat(['designSeconds', 'message']);
+      // designSeconds is meaningless for a scheduled battle; tolerated (valid value) so a
+      // form that always sends it still works.
+      let scheduledKeys = common.concat(['startAt', 'fightEndsAt', 'designSeconds', 'message']);
+      return d.challenger == request.auth.uid
+        && d.opponent is string && d.opponent.size() > 0 && d.opponent.size() <= 128
+        && d.opponent != d.challenger
+        && d.players == [d.challenger, d.opponent]
+        && d.status == 'pending'
+        && d.theme in ['day', 'night']
+        && d.createdAt == request.time
+        && (!('message' in d) || (d.message is string && d.message.size() <= MESSAGE_MAX()))
+        && nameMapOk(d.names, d) && thMapOk(d.townHalls, d)
+        && d.ready == {} && d.snapshots == {} && d.attempts == {} && d.results == {} && d.settled == {}
+        && ((d.mode == 'instant'
+              && d.keys().hasAll(common.concat(['designSeconds']))
+              && d.keys().hasOnly(instantKeys)
+              && d.designSeconds in INSTANT_DESIGN_OPTIONS())
+          || (d.mode == 'scheduled'
+              && d.keys().hasAll(common.concat(['startAt', 'fightEndsAt']))
+              && d.keys().hasOnly(scheduledKeys)
+              && (!('designSeconds' in d) || d.designSeconds in INSTANT_DESIGN_OPTIONS())
+              && d.startAt is timestamp
+              && d.startAt >= request.time + secs(SCHEDULED_MIN_LEAD_SECONDS() - TIME_SLACK_SECONDS())
+              && d.startAt <= request.time + secs(SCHEDULED_MAX_LEAD_SECONDS())
+              && d.fightEndsAt == d.startAt + secs(SCHEDULED_FIGHT_SECONDS())))
+        // You can only challenge a real player.
+        && exists(/databases/$(database)/documents/players/$(d.opponent))
+        && challengeCooldownOk(d.challenger, battleId);
+    }
+
+    // One challenge per CHALLENGE_COOLDOWN per player: the same batch stamps
+    // players/{challenger}.lastChallengeAt with the server time, and the stamp it replaces
+    // must be at least the cooldown old. (A flood of challenges used to push a player's real
+    // battles out of their 30-battle list.) The stamp also names THIS battle in lastChallengeId:
+    // a batch leaves one value there, so one stamp pays for exactly one create (a single stamp
+    // used to cover a whole batch of 499 creates).
+    function challengeCooldownOk(uid, battleId) {
+      let before = get(/databases/$(database)/documents/players/$(uid)).data;
+      let after = getAfter(/databases/$(database)/documents/players/$(uid)).data;
+      return after.get('lastChallengeAt', null) == request.time
+        && after.get('lastChallengeId', null) == battleId
+        && (!('lastChallengeAt' in before)
+          || before.lastChallengeAt <= request.time - secs(CHALLENGE_COOLDOWN_SECONDS()));
+    }
+
+    function nameMapOk(m, d) {
+      return m is map && m.keys().hasOnly([d.challenger, d.opponent]) && d.challenger in m
+        && battleNameOk(m[d.challenger])
+        && (!(d.opponent in m) || battleNameOk(m[d.opponent]));
+    }
+    function thMapOk(m, d) {
+      return m is map && m.keys().hasOnly([d.challenger, d.opponent]) && d.challenger in m
+        && thOk(m[d.challenger])
+        && (!(d.opponent in m) || thOk(m[d.opponent]));
+    }
+    function battleNameOk(n) { return n is string && n.size() >= 1 && n.size() <= 40; }
+
+    // pending -> expired happens by the clock, not by a write.
+    function respondDeadline(b) {
+      return b.mode == 'instant'
+        ? b.createdAt + secs(INSTANT_RESPOND_SECONDS())
+        : b.startAt - secs(SCHEDULED_ACCEPT_BEFORE_SECONDS());
+    }
+
+    // ---- accept (opponent, pending, before the respond deadline)
+    function acceptOk() {
+      let o = resource.data;
+      let d = request.resource.data;
+      let ch = changed();
+      return request.auth.uid == o.opponent
+        && o.status == 'pending' && d.status == 'accepted'
+        && request.time < respondDeadline(o)
+        && d.acceptedAt == request.time
+        // The opponent may fill in its own name / Town Hall on the card, nothing else.
+        && ownEntryOnly(o.names, d.names, o.opponent)
+        && (!(o.opponent in d.names) || battleNameOk(d.names[o.opponent]))
+        && ownEntryOnly(o.townHalls, d.townHalls, o.opponent)
+        && (!(o.opponent in d.townHalls) || thOk(d.townHalls[o.opponent]))
+        && ((o.mode == 'instant'
+              && ch.hasAll(['status', 'acceptedAt', 'startAt', 'fightEndsAt'])
+              && ch.hasOnly(['status', 'acceptedAt', 'startAt', 'fightEndsAt', 'names', 'townHalls'])
+              && d.startAt is timestamp
+              && d.startAt >= request.time + secs(o.designSeconds) - secs(TIME_SLACK_SECONDS())
+              && d.startAt <= request.time + secs(o.designSeconds + TIME_SLACK_SECONDS())
+              && d.fightEndsAt == d.startAt + secs(INSTANT_FIGHT_SECONDS()))
+          || (o.mode == 'scheduled'
+              && ch.hasAll(['status', 'acceptedAt'])
+              && ch.hasOnly(['status', 'acceptedAt', 'names', 'townHalls'])));
+    }
+
+    function ownEntryOnly(oldMap, newMap, uid) {
+      return newMap is map && newMap.diff(oldMap).affectedKeys().hasOnly([uid]);
+    }
+
+    // ---- decline (opponent) / cancel (challenger), both only while pending
+    function declineOk() {
+      return request.auth.uid == resource.data.opponent
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'declined'
+        && changed().hasOnly(['status']);
+    }
+    function cancelOk() {
+      return request.auth.uid == resource.data.challenger
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'cancelled'
+        && changed().hasOnly(['status']);
+    }
+
+    // ---- ready (instant, design phase, own key). When both are ready the same write may
+    // pull startAt forward to "now" (never later than it was) and re-derive fightEndsAt.
+    function readyOk() {
+      let o = resource.data;
+      let d = request.resource.data;
+      let ch = changed();
+      return o.mode == 'instant' && o.status == 'accepted'
+        && request.time < o.startAt
+        && ch.hasAll(['ready']) && ch.hasOnly(['ready', 'startAt', 'fightEndsAt'])
+        && d.ready is map
+        && d.ready.diff(o.ready).affectedKeys().hasOnly([request.auth.uid])
+        && d.ready[request.auth.uid] == true
+        && (!ch.hasAny(['startAt', 'fightEndsAt'])
+          || (d.ready.keys().hasAll([o.challenger, o.opponent])
+              && nearNow(d.startAt)
+              && d.startAt <= o.startAt
+              && d.fightEndsAt == d.startAt + secs(INSTANT_FIGHT_SECONDS())));
+    }
+
+    // ---- snapshot (lock a city at/after startAt). Either participant may write either
+    // player's snapshot: it must equal that player's live city doc, which is the proof. The
+    // owner locks at startAt (after pushing their last edits); the OTHER player only from
+    // startAt + LOCK_GRACE, so an early lock cannot catch the owner's city mid-save.
+    function snapshotOk() {
+      let o = resource.data;
+      let d = request.resource.data;
+      let sk = d.snapshots.diff(o.snapshots).affectedKeys();
+      return o.status == 'accepted'
+        && request.time >= o.startAt
+        && changed().hasOnly(['snapshots'])
+        && sk.size() > 0 && sk.hasOnly([o.challenger, o.opponent])
+        && (!(o.challenger in sk) || snapOk(o, d, o.challenger))
+        && (!(o.opponent in sk) || snapOk(o, d, o.opponent));
+    }
+    function snapOk(o, d, u) {
+      let s = d.snapshots[u];
+      let city = get(/databases/$(database)/documents/cities/$(u)).data;
+      return !(u in o.snapshots)
+        && (u == request.auth.uid || request.time >= o.startAt + secs(LOCK_GRACE_SECONDS()))
+        && s is map
+        && s.keys().hasAll(['layout', 'townHall', 'name', 'rev', 'lockedAt'])
+        && s.keys().hasOnly(['layout', 'townHall', 'name', 'rev', 'lockedAt'])
+        && s.layout == city.layout
+        && s.townHall == city.townHall
+        && s.rev == city.rev
+        && battleNameOk(s.name)
+        && nearNow(s.lockedAt);
+    }
+
+    // ---- attempt (self, fight phase, once, only after both cities are locked)
+    function attemptOk() {
+      let o = resource.data;
+      let d = request.resource.data;
+      let me = request.auth.uid;
+      return o.status == 'accepted'
+        && request.time >= o.startAt && request.time < o.fightEndsAt
+        && o.snapshots.keys().hasAll([o.challenger, o.opponent])
+        && changed().hasOnly(['attempts'])
+        && d.attempts.diff(o.attempts).affectedKeys().hasOnly([me])
+        && !(me in o.attempts)
+        && d.attempts[me] is map
+        && d.attempts[me].keys().hasOnly(['startedAt'])
+        && d.attempts[me].startedAt == request.time;
+    }
+
+    // ---- result (self, once, after own attempt, until fightEndsAt + grace)
+    function resultOk() {
+      let o = resource.data;
+      let d = request.resource.data;
+      let me = request.auth.uid;
+      return o.status == 'accepted'
+        && me in o.attempts && !(me in o.results)
+        && request.time <= o.fightEndsAt + secs(RESULT_GRACE_SECONDS())
+        && changed().hasOnly(['results'])
+        && d.results.diff(o.results).affectedKeys().hasOnly([me])
+        && resultShapeOk(d.results[me]);
+    }
+    function resultShapeOk(r) {
+      return r is map
+        && r.keys().hasAll(['stars', 'percentage', 'destroyed', 'total', 'outcome', 'durationSec', 'loot', 'finishedAt'])
+        && r.keys().hasOnly(['stars', 'percentage', 'destroyed', 'total', 'outcome', 'durationSec', 'loot', 'finishedAt'])
+        && r.percentage is number && r.percentage >= 0 && r.percentage <= 100
+        && r.stars is int && r.stars == starsFor(r.percentage)
+        && uint(r.total) && r.total <= 1000
+        && uint(r.destroyed) && r.destroyed <= r.total
+        && percentageMatches(r)
+        && r.outcome in ['victory', 'retreat', 'busted', 'crash', 'timeout']
+        // AttackManager only ends in 'victory' at 100% (a rounded 99.5% counts, as in game).
+        && (r.outcome != 'victory' || r.percentage == 100)
+        && r.durationSec is number && r.durationSec >= 0 && r.durationSec <= RAID_TIME_LIMIT_SECONDS() + 60
+        && lootOk(r.loot)
+        && r.finishedAt == request.time;
+    }
+    // Same thresholds as DestructionEngine.getStats / battleRules.starsFor (25/60/95).
+    function starsFor(p) {
+      return p >= 95 ? 3 : (p >= 60 ? 2 : (p >= 25 ? 1 : 0));
+    }
+    // getStats: percentage = round(destroyed / total * 100), 0 when total is 0. Half a point
+    // of tolerance absorbs float rounding differences between JS and the rules engine.
+    function percentageMatches(r) {
+      return r.total == 0
+        ? r.percentage == 0
+        : math.abs(r.percentage - (r.destroyed * 100.0 / r.total)) <= 0.5000001;
+    }
+    function lootOk(l) {
+      return l is map
+        && l.keys().hasAll(['cash', 'iron', 'wood']) && l.keys().hasOnly(['cash', 'iron', 'wood'])
+        && nonNeg(l.cash) && nonNeg(l.iron) && nonNeg(l.wood);
+    }
+
+    // ---- resolve (either player): accepted -> finished with the one correct winner.
+    function resolveOk() {
+      let o = resource.data;
+      let d = request.resource.data;
+      return o.status == 'accepted' && d.status == 'finished'
+        && changed().hasAll(['status', 'winner', 'resolvedAt'])
+        && changed().hasOnly(['status', 'winner', 'resolvedAt'])
+        && d.resolvedAt == request.time
+        // battleRules.resolveDue: both results in; or the fight window is over and every raid
+        // that was started has its result (nobody can attempt any more, so nothing else can
+        // arrive); or the result grace period is over.
+        && (o.results.keys().hasAll([o.challenger, o.opponent])
+          || request.time >= o.fightEndsAt + secs(RESULT_GRACE_SECONDS())
+          || (request.time >= o.fightEndsAt && o.results.keys().hasAll(o.attempts.keys())))
+        && d.winner == winnerOf(o);
+    }
+    // battleRules.decideWinner: 'void' when nobody has a result; else stars, then percentage,
+    // then LOWER durationSec, else 'draw'. A missing result scores 0 stars, 0% and an infinite
+    // time (1e9 s stands in for Infinity - real durations are capped at RAID_TIME_LIMIT + 60).
+    function winnerOf(b) {
+      return !(b.challenger in b.results) && !(b.opponent in b.results) ? 'void' : ranked(b);
+    }
+    function ranked(b) {
+      let c = b.challenger;
+      let p = b.opponent;
+      let cs = scoreField(b, c, 'stars', 0);
+      let ps = scoreField(b, p, 'stars', 0);
+      let cp = scoreField(b, c, 'percentage', 0);
+      let pp = scoreField(b, p, 'percentage', 0);
+      let cd = scoreField(b, c, 'durationSec', 1000000000);
+      let pd = scoreField(b, p, 'durationSec', 1000000000);
+      return cs != ps ? (cs > ps ? c : p)
+        : cp != pp ? (cp > pp ? c : p)
+        : cd != pd ? (cd < pd ? c : p)
+        : 'draw';
+    }
+    function scoreField(b, u, field, missing) {
+      return u in b.results ? b.results[u][field] : missing;
+    }
+
+    // ---- settle (self key only, finished battles): settled.<me> = true and trophyChange.<me> =
+    // the trophies it really moved (a loss at 0 trophies moves 0). Except for a void battle
+    // (nothing moves, trophyChange 0), the record step on players/{me} is part of the same
+    // transaction: lastSettled names this battle, the counter the winner gives me ticks, and
+    // the trophy difference equals trophyChange (see also recordStepOk / settledTickOk).
+    function settleOk(battleId) {
+      let o = resource.data;
+      let d = request.resource.data;
+      let me = request.auth.uid;
+      let tc = d.get('trophyChange', {});
+      return o.status == 'finished'
+        && changed().hasOnly(['settled', 'trophyChange'])
+        && d.settled.diff(o.settled).affectedKeys().hasOnly([me])
+        && !(me in o.settled)
+        && d.settled[me] == true
+        && tc is map && tc.diff(o.get('trophyChange', {})).affectedKeys().hasOnly([me])
+        && me in tc && tc[me] is int
+        && (o.winner == 'void' ? tc[me] == 0 : settledRecordOk(battleId, me, o.winner, tc[me]));
+    }
+    function settledRecordOk(battleId, me, winner, applied) {
+      let pb = get(/databases/$(database)/documents/players/$(me)).data;
+      let pa = getAfter(/databases/$(database)/documents/players/$(me)).data;
+      return pa.get('lastSettled', null) == battleId
+        && pa.trophies - pb.trophies == applied
+        && (winner == 'draw' ? pa.draws == pb.draws + 1
+          : winner == me ? pa.wins == pb.wins + 1
+          : pa.losses == pb.losses + 1);
+    }
+
+    // ======================================================================================
+    // SHADOW DUEL (shares this Firebase project, shadow-duel-dark-2026, and its (default) database)
+    // Copied from the rules Shadow Duel had live on 2026-09-04 (ruleset 5e2b6a37...), unchanged in
+    // behaviour; only its helper functions are renamed (sd*) because this file already defines
+    // signedIn(). A Spark-plan project gets one free database, so both games share one ruleset:
+    // deploy rules from ONE place. Deploying Shadow Duel's own firestore.rules would wipe every
+    // City Siege rule above (and deploying an older copy of this file would wipe Shadow Duel's).
+    // Collections do not overlap: Shadow Duel uses entitlements/, profiles/, rooms/.
+    // ======================================================================================
+    function sdSignedIn() { return request.auth != null; }
+    function sdMe() { return request.auth.uid; }
+    // The Dark section is paid: an entitlement doc is written server-side
+    // (purchase backend or tool/grant_dark.sh), never by the client.
+    function sdEntitled() {
+      return sdSignedIn()
+        && exists(/databases/$(database)/documents/entitlements/$(sdMe()))
+        && get(/databases/$(database)/documents/entitlements/$(sdMe())).data.dark == true;
+    }
+
+    match /entitlements/{uid} {
+      allow read: if sdSignedIn() && uid == sdMe();
+      allow write: if false;
+    }
+
+    match /profiles/{uid} {
+      allow read: if sdSignedIn();
+      allow write: if sdSignedIn() && uid == sdMe()
+        && request.resource.data.keys().hasOnly(['name', 'char', 'updatedAt']);
+    }
+
+    // WebRTC signaling rooms. Only entitled players may host or join; the
+    // host owns the offer, the guest the answer, each their own candidates.
+    match /rooms/{code} {
+      allow read: if sdEntitled();
+      allow create: if sdEntitled() && request.resource.data.hostUid == sdMe();
+      allow update: if sdEntitled() && (
+        resource.data.hostUid == sdMe() ||
+        // A guest may claim an empty seat and post the answer.
+        (resource.data.guestUid == null && request.resource.data.guestUid == sdMe()) ||
+        resource.data.guestUid == sdMe()
+      );
+      allow delete: if sdEntitled() && resource.data.hostUid == sdMe();
+
+      match /callerCandidates/{id} {
+        allow read: if sdEntitled();
+        allow create: if sdEntitled() && get(/databases/$(database)/documents/rooms/$(code)).data.hostUid == sdMe();
+      }
+      match /calleeCandidates/{id} {
+        allow read: if sdEntitled();
+        allow create: if sdEntitled() && get(/databases/$(database)/documents/rooms/$(code)).data.guestUid == sdMe();
+      }
+    }
+  }
+}

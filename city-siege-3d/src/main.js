@@ -17,6 +17,8 @@ import { AttackManager } from './combat/AttackManager.js';
 import { UIManager } from './ui/UIManager.js';
 import { readCitySave, restoreCity, saveCity, backupCitySave, CITY_SAVE_KEY } from './builder/CityPersistence.js';
 import { formatDuration } from './data/progression.js';
+import { OnlineController } from './net/OnlineController.js';
+import { OnlineUI } from './ui/OnlineUI.js';
 
 class GameApp {
   constructor() {
@@ -208,12 +210,22 @@ class GameApp {
 
     this._initCityAutosave();
 
+    // Online layer (accounts, cloud save, battles, MCP tokens). Constructing it touches no
+    // network; init() loads Firebase only when this build is configured, and never blocks boot:
+    // the city above is already the local save, the cloud link happens in the background.
+    this.online = new OnlineController(this);
+    // ACCOUNT + BATTLES screens, the account pill and the design banner (they work offline too:
+    // the screens then explain how to turn online play on).
+    this.onlineUI = new OnlineUI({ game: this, ui: this.uiManager, online: this.online });
+
     // Start Main Loop
     this.animate = this.animate.bind(this);
     requestAnimationFrame(this.animate);
 
     // Public handle for tooling and acceptance tests.
     window.citySiege = this;
+
+    this.online.init();
   }
 
   /**
@@ -222,11 +234,19 @@ class GameApp {
    */
   _initCityAutosave() {
     this._citySaveQueued = false;
+    this.persistenceSuspended = false;
 
+    // The single funnel for city saves: every autosave path ends here, and so does the cloud
+    // push (debounced by CloudSync). Suspended persistence (an account switch wiping the local
+    // saves) writes nothing at all.
     this.saveCityNow = () => {
       this._citySaveQueued = false;
+      if (this.persistenceSuspended) return;
       saveCity(this.buildingManager);
+      if (this.online && this.online.cloudSync) this.online.cloudSync.schedulePush();
     };
+    this.suspendPersistence = () => { this.persistenceSuspended = true; };
+    this.resumePersistence = () => { this.persistenceSuspended = false; };
 
     this.queueCitySave = () => {
       if (this._citySaveQueued) return;

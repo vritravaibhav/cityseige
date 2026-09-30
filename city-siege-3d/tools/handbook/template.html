@@ -161,9 +161,9 @@ footer{margin-top:60px; color:var(--dim); font-size:12px}
   {{BUILDINGS}}
 
   <h2 id="raid">How a raid works</h2>
-  <p class="lead">You raid your own city with the buggy. Your defenses fight back, and whatever you destroy pays out as loot.</p>
+  <p class="lead">There are two kinds of raid. A <b>practice raid</b> (ATTACK CITY) is on your own city. A <b>battle raid</b> (BATTLES, online builds) is on a rival's locked city. Both play out the same way: the target's defenses fight back, and whatever you destroy pays out as loot.</p>
   <ol class="steps">
-    <li><div><b>Recon.</b> The camera frames your three gates. Tap one to choose where to break in.</div></li>
+    <li><div><b>Recon.</b> The camera frames the target's three gates. Tap one to choose where to break in.</div></li>
     <li><div><b>Breach.</b> The buggy rams the gate. Sirens start. Every turret, trap, spawner and aura arms at this moment, at its current level.</div></li>
     <li><div><b>Combat.</b> The buggy ({{BUGGY}} stock) auto-fires its cannon. Gates shoot back ({{GATE}}). A police cruiser or SWAT unit touching you is an instant bust. Drones strafe you even mid-air. Traps fire when you drive over them (your rounds fly over them). Inside an EMP field your ability cards are jammed.</div></li>
     <li><div><b>Hopping.</b> Space is a free small hop with a {{HOP}}s cooldown, so you can always get over a barrier but can't stay airborne. After a ram or a blast, further rams and blasts do nothing for {{IMM}}s; gunfire always lands.</div></li>
@@ -172,6 +172,7 @@ footer{margin-top:60px; color:var(--dim); font-size:12px}
   </ol>
   <div class="note"><b>Loot per destroyed building:</b> {{LOOT}}. Trees and landmines pay nothing. A Crypto Vault adds everything it has mined.<br>
   <b>Gem bounty on a win</b> pays in full only for a real fight: the city must have enough buildings <i>and</i> every kind of defense its Town Hall allows, each with {{KINDSHARE}} of its build limit standing at the Town Hall's level. Every gun, pursuit base (police, SWAT, drones), trap and aura building (Solar Array, Fusion Reactor, EMP Disrupter, Orbital Relay, Quantum Citadel) is its own kind (TH1: {{MINT1}} targets and {{KINDS1}} kind of defense; TH12: {{MINT12}} targets and {{KINDS12}} kinds). {{COVERSHARE}} of the defense half is paid on how well covered your kinds are on average and the other {{COVERPREMIUM}} on your WEAKEST kind alone, so leaving one kind out of the city costs far more than its share - gems only pay on a win, and a raid that has one kind of defense less to beat wins a lot more often. Short of either, the bounty is scaled down: a Town Hall 12 city with one kind of defense stowed pays {{GEMS12ONE}} of {{GEM_HIGH}} gems, with its EMPs, Relays and Citadel stowed {{GEMS12AURA}}, and with its traps stowed too {{GEMS12TRAPS}}. Stowing everything and raiding an empty city pays nothing.</div>
+  <div class="note"><b>Battle raids</b> run on the opponent's city as it was <i>locked</i> at the battle's start time, loaded into a separate arena, so your own city and its save are never touched. Choosing a gate uses your one attempt; ABORT RECON before that is free. A 10-minute clock runs from the breach, and at 0:00 the raid ends as TIME'S UP with whatever you razed. Your buggy, cannon and deck come from <i>your</i> labs and garage; defenses, police, loot and the gem bounty come from <i>their</i> city. The raid pays the usual loot and gems, and nobody's bank is debited. More stars wins the battle, then higher destruction %, then the faster raid; the winner gets +30 trophies and the loser -20 (never below 0), a draw gives both +5, and a battle nobody raided is void (no trophies). Full rules: <code>docs/BATTLES.md</code>.</div>
 
   <h2 id="garage">Buggy &amp; garage</h2>
   <p class="lead">Offense lives in the Vehicle Garage. Five tuning tracks go to level 12, and <b>Vehicle Lab level L opens tuning level L+1</b>, so the garage keeps growing with the city. Deck slots by Vehicle Lab 0 / 1 / 2 / 3: {{SLOTS}}. Card gates: {{GATES}}.</p>
@@ -181,13 +182,22 @@ footer{margin-top:60px; color:var(--dim); font-size:12px}
   <div class="tbl"><table><thead><tr><th>Card</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th></tr></thead><tbody>{{CARDS}}</tbody></table></div>
 
   <h2 id="saves">Saving &amp; timers</h2>
-  <p class="lead">Three things are saved in the browser, separately.</p>
+  <p class="lead">Three things are saved in the browser, separately. In an online build, signing in also keeps them in your account, so the same city follows you to another device.</p>
   <div class="tbl"><table><thead><tr><th>Save key</th><th>Holds</th><th>When it saves</th></tr></thead><tbody>
     <tr><th scope="row"><code>city_siege_city</code></th><td>Every building's type, tile, level and rotation; every road tile; stored output; every running build job as an <b>end time</b>, not a countdown.</td><td>Within a second of any change, and when the tab is hidden or closed.</td></tr>
     <tr><th scope="row"><code>city_siege_eco</code></th><td>Cash, iron, wood, gems, the Construction Inventory, the level of each stowed building, spare lives.</td><td>On every spend, collect or purchase.</td></tr>
     <tr><th scope="row"><code>city_siege_garage</code></th><td>Tuning levels, card unlocks and levels, the raid deck.</td><td>On every garage purchase.</td></tr>
+    <tr><th scope="row"><code>city_siege_cloud</code></th><td>Online builds only: which account this browser's save belongs to, the last cloud version it synced, and the AI designer's bank credits already paid.</td><td>On sign-in and after every sync.</td></tr>
+    <tr><th scope="row"><code>city_siege_cloud_base</code></th><td>Online builds only: a copy of the cloud city this browser last synced, so changes made here (offline, or in the second before a sync) can be merged onto a newer cloud version instead of lost.</td><td>After every sync.</td></tr>
   </tbody></table></div>
-  <div class="note">Jobs are saved as end times, so they keep counting down while the game is closed. On the next launch, finished jobs show as "finished while you were away" and producers catch up on what they made. A save that won't load is kept as <code>&lt;key&gt;.bak</code> instead of being overwritten. Jobs never complete mid-raid; they wait until you're back in the city.</div>
+  <h3 style="font-size:16px; margin-top:18px">In your account (online builds, signed in)</h3>
+  <div class="tbl"><table><thead><tr><th>Cloud document</th><th>Holds</th><th>When it saves</th></tr></thead><tbody>
+    <tr><th scope="row"><code>cities/&lt;you&gt;</code></th><td>The same city as <code>city_siege_city</code> (every building keeps a stable id), plus the Construction Inventory and stowed buildings. Every save is a new numbered version. Rivals can read it; only your game and your AI designer write it.</td><td>1.5 seconds after a change (never more than 3 seconds while you keep editing), at once after a purchase, upgrade, collect or gem finish, and at once when the tab is hidden.</td></tr>
+    <tr><th scope="row"><code>saves/&lt;you&gt;</code></th><td>Cash, iron, wood, gems, spare lives and the garage. Private. Two devices' spends and incomes are merged, never overwritten.</td><td>3 seconds after a spend, collect or garage purchase.</td></tr>
+    <tr><th scope="row"><code>players/&lt;you&gt;</code></th><td>Commander name, Town Hall, trophies and wins / losses / draws. Public.</td><td>When a battle settles; last-seen every minute while you play.</td></tr>
+  </tbody></table></div>
+  <div class="note">Jobs are saved as end times, so they keep counting down while the game is closed. On the next launch, finished jobs show as "finished while you were away" and producers catch up on what they made. A save that won't load is kept as <code>&lt;key&gt;.bak</code> instead of being overwritten. Jobs never complete mid-raid; they wait until you're back in the city.<br>
+  <b>Online:</b> the game still starts from the browser save, then syncs. If the cloud has a newer version (from another device or your AI designer), it is applied as soon as you are not raiding or dragging a building: its layout wins, and whatever you did here that it has not seen - purchases, upgrades, collects, roads and moves that still fit - is merged onto it. Signing in on a browser you played on as a guest keeps that guest city on the device (ACCOUNT offers to restore it). A second account signing in on the same browser starts fresh; the first account's saves are kept as <code>&lt;key&gt;.bak.&lt;account&gt;</code> and in its cloud copy. Details: <code>docs/ONLINE.md</code>.</div>
 
   <h2 id="tables">Master tables</h2>
   <p class="lead">The same numbers as the cards, all in one place for comparing.</p>

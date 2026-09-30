@@ -5,13 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 3000 --host",
+    "dev:emu": "vite --mode emulator --port 3101 --strictPort",
+    "dev:live": "vite --mode production --port 3102 --strictPort",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "emulators": "firebase emulators:start --only auth,firestore --project demo-city-siege",
+    "mcp": "node mcp-server/src/index.js",
+    "mcp:http": "node mcp-server/src/index.js --http",
+    "test:shared": "node tools/online/test-shared.mjs",
+    "test:sync": "node tools/online/test-sync-merge.mjs",
+    "test:rules": "node tools/online/test-firestore-rules.mjs",
+    "test:mcp": "node mcp-server/test/run.mjs",
+    "test:parity": "node tools/online/parity-check.mjs",
+    "test:e2e": "node tools/online/e2e-pvp.mjs",
+    "fixtures": "node tools/online/fixtures/generate.mjs",
+    "test:online": "firebase emulators:exec --only auth,firestore --project demo-city-siege \"node tools/online/test-shared.mjs && node tools/online/test-sync-merge.mjs && node tools/online/test-firestore-rules.mjs && node mcp-server/test/run.mjs\"",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes --project shadow-duel-dark-2026"
   },
   "dependencies": {
+    "firebase": "^12.19.0",
     "three": "^0.160.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "vite": "^5.0.12"
   }
 }

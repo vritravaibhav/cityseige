@@ -49,8 +49,12 @@
           </div>
         </div>
 
-        <!-- Sound Toggle -->
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <!-- Account pill (cloud save status dot) + Sound Toggle -->
+        <div class="top-bar-right" style="display: flex; gap: 10px; align-items: center;">
+          <button id="btn-account" class="account-pill" title="Account, cloud save and AI designer">
+            <span id="account-cloud-dot" class="cloud-dot is-offline"></span>
+            <span id="account-pill-label" class="account-pill-label">👤 Sign in</span>
+          </button>
           <button id="btn-toggle-sound" class="tool-btn sound-toggle-btn" title="Toggle Audio">
             <span id="sound-icon">🔊</span>
           </button>
@@ -63,8 +67,17 @@
           <span class="action-icon">⚔️</span>
           <div class="action-text">
             <span class="action-title">ATTACK CITY</span>
-            <span class="action-sub">Recon & Breach</span>
+            <span class="action-sub">Practice raid</span>
           </div>
+        </button>
+
+        <button id="btn-open-battles" class="btn-home-action btn-battles-glow">
+          <span class="action-icon">🏆</span>
+          <div class="action-text">
+            <span class="action-title">BATTLES</span>
+            <span class="action-sub">Challenge a rival</span>
+          </div>
+          <span id="battles-dock-badge" class="dock-badge hidden" title="Battles waiting for you">0</span>
         </button>
 
         <button id="btn-open-garage" class="btn-home-action btn-garage-glow">
@@ -136,6 +149,11 @@
 
       <!-- Bottom Construction Inventory Drawer (Only shows purchased items ready to place!) -->
       <div class="design-bottom-drawer">
+        <!-- Battle design-phase banner (OnlineUI): floats just above the drawer, whatever its height -->
+        <div id="battle-design-banner" class="battle-design-banner hidden">
+          <span id="battle-banner-text" class="battle-banner-text"></span>
+          <button id="btn-banner-battles" class="btn-secondary battle-banner-btn">⚔️ BATTLES</button>
+        </div>
         <div class="design-drawer-header">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-weight: 800; font-size: 14px; color: var(--accent-cyan);">📦 CONSTRUCTION INVENTORY</span>
@@ -270,6 +288,84 @@
             <div id="garage-deck-strip" class="garage-deck-strip"></div>
             <div id="garage-tab-body"></div>
           </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ===== 3c. BATTLES (FULL SCREEN, OnlineUI) ===== -->
+    <div id="battles-view" class="shop-screen battles-screen hidden">
+      <header class="shop-topbar">
+        <div class="shop-brand">
+          <div class="shop-brand-icon">🏆</div>
+          <div>
+            <div class="shop-brand-title">BATTLES</div>
+            <div class="shop-brand-sub">Challenge a rival, design your city until it locks, then raid theirs. Stars decide.</div>
+          </div>
+        </div>
+
+        <div class="resource-tickers shop-res-display online-topbar-stats">
+          <div class="res-item" title="Trophies"><span class="res-icon">🏆</span><span id="battles-trophies" class="res-val">0</span></div>
+          <div id="battles-record" class="res-item online-record-badge" title="Wins - losses - draws">0W · 0L · 0D</div>
+        </div>
+
+        <div class="shop-topbar-actions">
+          <button id="btn-close-battles" class="btn-secondary">← BACK TO CITY</button>
+          <button id="btn-battles-new" class="btn-primary btn-attack-glow">🎯 NEW CHALLENGE</button>
+        </div>
+      </header>
+
+      <div class="shop-body">
+        <nav class="shop-sidebar">
+          <div class="shop-sidebar-title">BATTLES</div>
+          <button class="shop-tab-btn battles-tab-btn active" data-tab="active">🔥 Active <span id="battles-tab-count" class="tab-count hidden">0</span></button>
+          <button class="shop-tab-btn battles-tab-btn" data-tab="challenge">🎯 Challenge</button>
+          <button class="shop-tab-btn battles-tab-btn" data-tab="history">📜 History</button>
+
+          <div class="shop-sidebar-note" id="battles-side-note">
+            <!-- Rendered by OnlineUI.renderBattles -->
+          </div>
+        </nav>
+
+        <main class="shop-main">
+          <div id="battles-main"></div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ===== 3d. ACCOUNT (FULL SCREEN, OnlineUI) ===== -->
+    <div id="account-view" class="shop-screen account-screen hidden">
+      <header class="shop-topbar">
+        <div class="shop-brand">
+          <div class="shop-brand-icon">👤</div>
+          <div>
+            <div class="shop-brand-title">COMMANDER ACCOUNT</div>
+            <div class="shop-brand-sub">Cloud save for your city, your battle record, and your AI designer (MCP).</div>
+          </div>
+        </div>
+
+        <div class="resource-tickers shop-res-display online-topbar-stats">
+          <div id="account-sync-badge" class="res-item online-sync-badge"><span class="cloud-dot is-offline"></span><span>Offline</span></div>
+        </div>
+
+        <div class="shop-topbar-actions">
+          <button id="btn-close-account" class="btn-secondary">← BACK TO CITY</button>
+          <button id="btn-account-to-battles" class="btn-primary">🏆 BATTLES</button>
+        </div>
+      </header>
+
+      <div class="shop-body">
+        <nav class="shop-sidebar">
+          <div class="shop-sidebar-title">ACCOUNT</div>
+          <button class="shop-tab-btn account-tab-btn active" data-tab="profile">👤 Profile</button>
+          <button class="shop-tab-btn account-tab-btn" data-tab="mcp">🤖 AI Designer (MCP)</button>
+
+          <div class="shop-sidebar-note" id="account-side-note">
+            <!-- Rendered by OnlineUI.renderAccount -->
+          </div>
+        </nav>
+
+        <main class="shop-main">
+          <div id="account-main"></div>
         </main>
       </div>
     </div>
@@ -411,6 +507,15 @@
         <div class="scan-label">TARGET SECTOR LOCKED</div>
         <div id="scan-gate-name" class="scan-target">NORTH GATE</div>
         <div class="scan-status">CALIBRATING INGRESS TRAJECTORY... BREACH INCOMING</div>
+      </div>
+    </div>
+
+    <!-- ================= BATTLE RAID HUD (PvP raids only: opponent + raid clock) ================= -->
+    <div id="battle-raid-hud" class="battle-raid-hud hidden">
+      <div class="battle-raid-vs">⚔️ BATTLE vs <strong id="battle-raid-name">RIVAL</strong></div>
+      <div class="battle-raid-clock">
+        <span id="battle-raid-timer" class="battle-raid-timer">10:00</span>
+        <span id="battle-raid-note" class="battle-raid-note">CLOCK STARTS AT THE BREACH</span>
       </div>
     </div>
 

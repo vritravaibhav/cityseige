@@ -22,16 +22,11 @@ import {
 import { MESH_FACTORIES } from '../rendering/meshes/index.js';
 import { isChainBarrier, standingBarrierIndex, barrierLinksOf } from './BarrierWalls.js';
 import { serializeCity, restoreCity } from './CityPersistence.js';
+// The three fixed Main Gates live in the pure rules module (the MCP server validates layouts
+// with the same list); re-exported so existing importers keep working.
+import { MAIN_GATES, newBuildingId } from '../shared/cityRules.js';
 
-/**
- * The city's three Main Gates: fixed features of the perimeter wall. They are never sold,
- * moved or upgraded, so every city (fresh, restored or rearranged) has exactly these.
- */
-export const MAIN_GATES = [
-  { name: 'North Gate', gx: 0, gz: -15, rot: 0 },
-  { name: 'East Gate', gx: 15, gz: 0, rot: Math.PI / 2 },
-  { name: 'South Gate', gx: 0, gz: 15, rot: Math.PI }
-];
+export { MAIN_GATES };
 
 /**
  * BuildingManager - Manages building placement, upgrades, visual tiers and the
@@ -308,6 +303,8 @@ export class BuildingManager {
 
     let jobsKept = 0;
     const carryOver = (rec, nb) => {
+      // Same building, new slot: it keeps its id (remote edits address buildings by id).
+      if (rec.b && rec.b.id) nb.id = rec.b.id;
       if (nb.produceType && Number.isFinite(Number(rec.stored))) {
         nb.stored = Math.max(0, Math.min(nb.maxCapacity, Number(rec.stored)));
       }
@@ -340,6 +337,7 @@ export class BuildingManager {
     for (const { rec, gx, gz } of trees) {
       const nb = this.addBuilding('tree', gx, gz, 1, { skipCapCheck: true });
       if (!nb) { leftovers.push(rec); continue; }
+      if (rec.b && rec.b.id) nb.id = rec.b.id;
       if (nb.mesh && rec.b.mesh) nb.mesh.rotation.y = rec.b.mesh.rotation.y;
     }
 
@@ -720,7 +718,9 @@ export class BuildingManager {
     this.buildingGroup.add(mesh);
 
     const b = {
-      id: `b_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      // Stable and unique across writers: persisted by CityPersistence, and the MCP server mints
+      // its ids with the same function (the old b_<ms>_<0..999> collided within a millisecond).
+      id: newBuildingId(Date.now()),
       type,
       name: def.name,
       level: lvl,

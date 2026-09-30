@@ -20,7 +20,10 @@ export class UIManager {
     this.sceneManager = sceneManager;
     this.garage = garageManager;
 
-    this.currentScreen = 'HOME'; // 'HOME' | 'DESIGN' | 'SHOP' | 'GARAGE' | 'RECON' | 'COMBAT' | 'RESULT'
+    this.currentScreen = 'HOME'; // 'HOME' | 'DESIGN' | 'SHOP' | 'GARAGE' | 'ACCOUNT' | 'BATTLES' | 'RECON' | 'COMBAT' | 'RESULT'
+    // The online screens (ACCOUNT, BATTLES, the design banner) are drawn by OnlineUI, which
+    // registers itself here once the OnlineController exists (main.js).
+    this.onlineUI = null;
     this.shopCategory = 'all';
     this.garageTab = 'tuning';          // 'tuning' | 'cards' | 'lab'
     this.garageReturnScreen = 'HOME';   // where BACK TO CITY goes (HOME, or DESIGN via the inspector)
@@ -81,6 +84,10 @@ export class UIManager {
     this.garageResCash = document.getElementById('garage-res-cash');
     this.garageResIron = document.getElementById('garage-res-iron');
     this.garageResWood = document.getElementById('garage-res-wood');
+
+    // Online full screens (rendered by OnlineUI)
+    this.accountView = document.getElementById('account-view');
+    this.battlesView = document.getElementById('battles-view');
 
     // Floating Harvest Container
     this.harvestContainer = document.getElementById('floating-harvest-container');
@@ -195,6 +202,8 @@ export class UIManager {
       // Undo Template goes away the moment anything else changes (it would roll that back too).
       if (this.currentScreen === 'DESIGN') this._updateUndoPresetBtn();
       this.updateBuilderHUD();
+      // Battle countdowns (BATTLES screen, design banner) tick on this same interval.
+      if (this.onlineUI) this.onlineUI.tick();
     }, 400);
   }
 
@@ -511,6 +520,8 @@ export class UIManager {
     if (this.reconBanner) this.reconBanner.classList.add('hidden');
     if (this.shopModal) this.shopModal.classList.add('hidden');
     if (this.garageView) this.garageView.classList.add('hidden');
+    if (this.accountView) this.accountView.classList.add('hidden');
+    if (this.battlesView) this.battlesView.classList.add('hidden');
     if (this.redesignModal) this.redesignModal.classList.add('hidden');
     // Closing the panel forgets its building too: kept, it popped the panel back open on its
     // own when that building's job finished after a trip to the shop.
@@ -537,6 +548,12 @@ export class UIManager {
       if (this.garageView) this.garageView.classList.remove('hidden');
       this.grid.setMode('locked');
       this.renderGarage();
+    } else if (screen === 'ACCOUNT' || screen === 'BATTLES') {
+      // Full screens like the garage (.shop-screen, so GridSystem ignores their taps), drawn by
+      // OnlineUI.onScreen below; the map is locked behind them.
+      const view = screen === 'ACCOUNT' ? this.accountView : this.battlesView;
+      if (view) view.classList.remove('hidden');
+      this.grid.setMode('locked');
     } else if (screen === 'RECON') {
       if (this.reconBanner) this.reconBanner.classList.remove('hidden');
       this.grid.setMode('locked');
@@ -547,6 +564,7 @@ export class UIManager {
       if (this.resultModal) this.resultModal.classList.remove('hidden');
       this.grid.setMode('locked');
     }
+    if (this.onlineUI) this.onlineUI.onScreen(screen);
   }
 
   _initHomeNavigation() {
@@ -1034,6 +1052,9 @@ export class UIManager {
 
   openGarage(tab = 'tuning') {
     this.garageReturnScreen = (this.currentScreen === 'DESIGN') ? 'DESIGN' : 'HOME';
+    // Set by OnlineUI after this call when a battle's ATTACK needed cards first: the garage's
+    // ATTACK then raids that battle and BACK returns to BATTLES.
+    this.garageBattle = null;
     this.garageTab = tab;
     this.hideBuildingInspector();
     this.setScreen('GARAGE');
@@ -1046,6 +1067,7 @@ export class UIManager {
     if (btnClose) {
       btnClose.addEventListener('click', () => {
         this.sound.playClick();
+        this.garageBattle = null;
         this.setScreen(this.garageReturnScreen || 'HOME');
       });
     }
@@ -1054,6 +1076,12 @@ export class UIManager {
     if (btnAttack) {
       btnAttack.addEventListener('click', () => {
         this.sound.playClick();
+        const battle = this.garageBattle;
+        if (battle && this.onlineUI && this.garage && this.garage.getLoadout().length > 0) {
+          this.garageBattle = null;
+          this.onlineUI._attack(battle.id);   // the battle raid, not a practice raid on my city
+          return;
+        }
         this.requestAttack();
       });
     }
@@ -1246,6 +1274,9 @@ export class UIManager {
       const empty = g.getLoadout().length === 0;
       btnAttack.disabled = empty;
       btnAttack.title = empty ? 'Equip at least one card' : '';
+      // textContent: the battle label carries another player's name.
+      const label = this.garageBattle ? `⚔️ ATTACK ${this.garageBattle.name}` : '⚔️ ATTACK WITH THIS LOADOUT';
+      if (btnAttack.textContent !== label) btnAttack.textContent = label;
     }
 
     document.querySelectorAll('#garage-view .garage-tab-btn').forEach(t => {
@@ -2322,6 +2353,102 @@ export class UIManager {
     });
   }
 
+  // ---------------------------------------------------------------- battle raid HUD + result line
+
+  /**
+   * PvP battle raid (AttackManager.startBattleRaid): a pill under EXIT RAID naming the opponent
+   * with the raid clock. It stays up from recon (where it says the clock starts at the breach)
+   * until the raid is over and the city is back, so it is not part of any screen setScreen toggles.
+   */
+  showBattleRaidHud(opponentName, limitSeconds) {
+    this._battleResultStatus = null;   // a new battle raid: the last one's delivery line is gone
+    const hud = document.getElementById('battle-raid-hud');
+    if (!hud) return;
+    const name = document.getElementById('battle-raid-name');
+    if (name) name.textContent = opponentName || 'Rival';   // textContent: another player's name
+    this._battleTimerKey = null;
+    this.updateBattleRaidTimer(limitSeconds, false);
+    hud.classList.remove('hidden');
+    // The recon banner appears right after this call (startRecon): place the pill once it is up.
+    requestAnimationFrame(() => this._placeBattleRaidHud(hud));
+    if (!this._battleHudResize) {
+      this._battleHudResize = () => { if (!hud.classList.contains('hidden')) this._placeBattleRaidHud(hud); };
+      window.addEventListener('resize', this._battleHudResize);
+    }
+  }
+
+  /**
+   * The pill's CSS spot is under EXIT RAID, which is free on a wide screen. On a narrower one
+   * (a phone, a landscape phone, a small tablet) the recon banner, the destruction tracker or the
+   * radar reach over that spot and the pill hid the damage and loot numbers - so it drops below
+   * whichever of them it would cover. Re-measured with the clock, since the tracker's height
+   * follows its numbers.
+   */
+  _placeBattleRaidHud(hud) {
+    if (hud.classList.contains('hidden')) return;
+    hud.style.top = '';
+    const pill = hud.getBoundingClientRect();
+    let top = pill.top;
+    const blockers = ['.tactical-banner', '.combat-top-tracker', '.combat-radar-container', '.radar-label']
+      .map(sel => document.querySelector(sel))
+      .filter(Boolean)
+      .map(el => el.getBoundingClientRect())
+      .filter(r => r.width > 0 && r.height > 0 && r.left < pill.right && r.right > pill.left);   // shown, same column
+    for (let pass = 0; pass < blockers.length; pass++) {
+      for (const r of blockers) if (r.top < top + pill.height && r.bottom > top) top = r.bottom + 8;
+    }
+    if (top !== pill.top) hud.style.top = `${Math.round(top)}px`;
+  }
+
+  /**
+   * `running` false = the clock has not started yet (recon, the swoop). Redraws once a second.
+   * `note` replaces the caption (recon: 'PICK A GATE WITHIN' the battle's closing window).
+   */
+  updateBattleRaidTimer(secondsLeft, running = true, note = '') {
+    const hud = document.getElementById('battle-raid-hud');
+    if (!hud) return;
+    const t = Math.max(0, Math.ceil(Number(secondsLeft) || 0));
+    const key = `${t}|${running}|${note}`;
+    if (key === this._battleTimerKey) return;
+    this._battleTimerKey = key;
+    this._placeBattleRaidHud(hud);
+    const timer = document.getElementById('battle-raid-timer');
+    const noteEl = document.getElementById('battle-raid-note');
+    if (timer) timer.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    if (noteEl) noteEl.textContent = note || (!running ? 'CLOCK STARTS AT THE BREACH' : t > 0 ? 'TIME LEFT' : 'TIME\'S UP');
+    hud.classList.toggle('is-low', (running || !!note) && t <= 60);
+  }
+
+  hideBattleRaidHud() {
+    const hud = document.getElementById('battle-raid-hud');
+    if (hud) hud.classList.add('hidden');
+    this._battleTimerKey = null;
+  }
+
+  /**
+   * The battle result screen's delivery line: 'sending' | 'sent' | 'failed'. AttackManager sets
+   * it as the caller's submit settles, and the caller may set it again later (a retry that got
+   * through). Remembered, so a status that lands before the modal opens is still shown.
+   */
+  setBattleResultStatus(status, detail) {
+    this._battleResultStatus = { status, detail: detail || '' };
+    this._renderBattleResultStatus();
+  }
+
+  _renderBattleResultStatus() {
+    const el = document.getElementById('result-battle-status');
+    if (!el) return;
+    const s = this._battleResultStatus || { status: 'sending', detail: '' };
+    const text = {
+      sending: '⏳ Sending result to the battle…',
+      sent: 'Result sent ✓',
+      failed: '⚠ Result not sent (retrying)',
+      closed: '✗ Not counted: the battle had closed before this raid could count'
+    }[s.status] || '';
+    el.textContent = s.detail ? `${text} - ${s.detail}` : text;
+    el.className = `result-battle-status is-${s.status}`;
+  }
+
   showResultModal(stats, onFinish) {
     if (!this.resultModal) return;
     this.resultModal.classList.remove('hidden');
@@ -2329,11 +2456,19 @@ export class UIManager {
     const content = document.getElementById('result-content');
     if (!content) return;
 
+    // A PvP battle raid (AttackManager.startBattleRaid) tags its stats with the battle: the screen
+    // names the opponent, says whether the score reached the battle, and only returns to the city
+    // (the loot was banked when the raid ended, as it always was).
+    const battle = stats.battle || null;
+    const clock = (s) => { const t = Math.max(0, Math.round(s || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+
     content.innerHTML = `
+      ${battle ? '<div class="result-battle-head">⚔️ BATTLE vs <span class="result-battle-name"></span></div>' : ''}
       <div class="result-badge ${stats.outcome === 'victory' ? 'result-victory' : ''}">${
         stats.outcome === 'victory' ? '🏆 100% DESTRUCTION - ATTACK COMPLETED! 🏆'
         : stats.outcome === 'retreat' ? '🏳️ RETREATED - LOOT SECURED'
         : stats.outcome === 'busted' ? '🚨 BUSTED BY POLICE - OUT OF LIVES 🚨'
+        : stats.outcome === 'timeout' ? '⏱️ TIME\'S UP - RAID OVER ⏱️'
         : '💥 BUGGY DESTROYED - OUT OF LIVES 💥'}</div>
       <div class="result-stars">
         <span class="${stats.stars >= 1 ? 'star-gold' : 'star-dim'}">⭐</span>
@@ -2358,16 +2493,30 @@ export class UIManager {
           <span class="label">Iron & Wood Looted</span>
           <span class="val">⚙️ +${stats.looted.iron} | 🪵 +${stats.looted.wood}</span>
         </div>
+        ${battle ? `
+        <div class="result-metric result-metric-wide">
+          <span class="label">Raid Time (tie-breaker)</span>
+          <span class="val">⏱️ ${clock(battle.durationSec)} <small>of ${clock(battle.timeLimitSeconds)}</small></span>
+        </div>` : ''}
         ${stats.outcome === 'victory' ? `
-        <div class="result-metric" id="result-gems">
+        <div class="result-metric${battle ? ' result-metric-wide' : ''}" id="result-gems">
           <span class="label">Gems Earned</span>
-          <span class="val">💎 +${stats.gems || 0}${(stats.gems || 0) < stats.gemBounty ? ` <small>${this._gemShortfallText(stats)}</small>` : ''}</span>
+          <span class="val">💎 +${stats.gems || 0}${(stats.gems || 0) < stats.gemBounty ? ` <small>${this._gemShortfallText(stats, battle ? 'their' : 'your')}</small>` : ''}</span>
         </div>` : ''}
       </div>
+      ${battle && battle.reports ? '<div id="result-battle-status" class="result-battle-status"></div>' : ''}
       <button id="btn-collect-loot" class="btn-primary btn-large">
-        CLAIM LOOT & RETURN TO CITY 🏛️
+        ${battle ? 'RETURN TO CITY 🏛️' : 'CLAIM LOOT & RETURN TO CITY 🏛️'}
       </button>
     `;
+    // The battle screen carries two more rows (raid time, delivery line): keep it inside the window.
+    if (content.parentElement) content.parentElement.classList.toggle('result-box-battle', !!battle);
+    if (battle) {
+      // textContent: the name comes from another player's profile.
+      const nameEl = content.querySelector('.result-battle-name');
+      if (nameEl) nameEl.textContent = battle.opponentName || 'Rival';
+      this._renderBattleResultStatus();
+    }
 
     const btnCollect = document.getElementById('btn-collect-loot');
     if (btnCollect) {
@@ -2388,7 +2537,8 @@ export class UIManager {
    * the score are now separate, and the list says what it means - short of FULL COVER, which a
    * kind can be either by being absent or by standing below the Town Hall's level.
    */
-  _gemShortfallText(stats) {
+  _gemShortfallText(stats, whose = 'your') {
+    // `whose` is 'their' after a battle raid: the bounty follows the DEFENDER's Town Hall.
     // +1e-6 first: summing per-kind cover leaves 11.999999999999996, which floored to '11.9'.
     const covered = Math.floor((stats.gemThreat || 0) * 10 + 1e-6) / 10;
     const kindsTotal = stats.gemKinds || 0;
@@ -2397,8 +2547,8 @@ export class UIManager {
     const named = short.length > 6 ? `${short.slice(0, 6).join(', ')} and ${short.length - 6} more` : short.join(', ');
     const kinds = kindsTotal === 1 ? 'the one kind of defense' : `all ${kindsTotal} kinds of defense`;
     const premium = Math.round(100 * (1 - (stats.gemCoverShare === undefined ? 1 : stats.gemCoverShare)));
-    return `(the full ${stats.gemBounty} needs ${stats.gemMinTargets}+ structures and ${kinds} your Town Hall allows - ` +
-      `every gun, pursuit base, trap and aura building type, ${Math.round(100 * (stats.gemKindShare || 0))}% of each type's build limit standing at your Town Hall's level; ` +
+    return `(the full ${stats.gemBounty} needs ${stats.gemMinTargets}+ structures and ${kinds} ${whose} Town Hall allows - ` +
+      `every gun, pursuit base, trap and aura building type, ${Math.round(100 * (stats.gemKindShare || 0))}% of each type's build limit standing at ${whose} Town Hall's level; ` +
       `${premium}% of the bounty rides on your WEAKEST kind, so one kind left out costs far more than its share. ` +
       `This city had ${stats.total} ${stats.total === 1 ? 'structure' : 'structures'} and ${present} of ${kindsTotal} ${kindsTotal === 1 ? 'kind' : 'kinds'} on the ground, ` +
       `defense strength ${covered.toFixed(1)} of ${kindsTotal}` +

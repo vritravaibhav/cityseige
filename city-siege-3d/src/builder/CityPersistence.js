@@ -1,5 +1,6 @@
 import { MAX_BUILDING_LEVEL, buildSecondsFor, storedAfter, producePayout } from '../data/progression.js';
 import { isChainBarrier } from './BarrierWalls.js';
+import { MAIN_GATES, gateIdFor, isValidBuildingId } from '../shared/cityRules.js';
 
 /**
  * CityPersistence - saves and restores the city layout.
@@ -16,6 +17,9 @@ import { isChainBarrier } from './BarrierWalls.js';
  * Producers work the same way: the blob records what each one held at `savedAt`, and
  * restoreCity() credits the time since then (progression.storedAfter, capped at capacity),
  * so a mill left for three hours has three hours of wood waiting.
+ *
+ * Every building carries a stable `id` (optional in the blob, so older saves stay valid): the
+ * online layer and the MCP server address buildings by it, so it must survive a reload.
  */
 
 export const CITY_SAVE_KEY = 'city_siege_city';
@@ -39,6 +43,7 @@ export function serializeCity(bm, now = Date.now()) {
   // pre-hide output stamped 'now', and restoreCity credited nothing for those hours.
   if (bm.advanceProduction) bm.advanceProduction(now);
   const buildings = bm.buildings.map(b => ({
+    id: b.id,
     t: b.type,
     gx: Math.round(b.gx),
     gz: Math.round(b.gz),
@@ -59,6 +64,7 @@ export function serializeCity(bm, now = Date.now()) {
     if (i < 0) return;
     tasks.push({
       i,
+      id: task.building.id,
       t: task.building.type,
       gx: Math.round(task.building.gx),
       gz: Math.round(task.building.gz),
@@ -75,6 +81,9 @@ export function serializeCity(bm, now = Date.now()) {
 }
 
 export function saveCity(bm) {
+  // Defense in depth: a city loaded for a PvP raid (the arena) is someone else's and must never
+  // be written over the player's own save.
+  if (bm && bm.isForeignCity === true) return false;
   try {
     localStorage.setItem(CITY_SAVE_KEY, JSON.stringify(serializeCity(bm)));
     return true;
@@ -175,6 +184,10 @@ export function restoreCity(bm, blob, now = Date.now()) {
   // restored[i] is the building made from blob.buildings[i] (null if it was skipped), so
   // build jobs can find their building by index.
   const restored = [];
+  // Saved ids come back (remote edits address buildings by id), each at most once: a duplicate
+  // keeps the fresh id addBuilding generated. A gate's fixed id is never handed to anything else.
+  const usedIds = new Set();
+  const gateIds = new Set(MAIN_GATES.map(g => gateIdFor(g.name)));
   for (const s of blob.buildings || []) {
     restored.push(null);
     if (!s || typeof s.t !== 'string') continue;
@@ -197,8 +210,10 @@ export function restoreCity(bm, blob, now = Date.now()) {
       // A barrier's facing follows its wall links (BuildingManager draws them relative to it),
       // so only free-standing buildings take the saved rotation.
       if (b && b.mesh && !isChainBarrier(b) && Number.isFinite(Number(s.rot))) b.mesh.rotation.y = Number(s.rot);
+      if (b && isValidBuildingId(s.id) && !usedIds.has(s.id) && !gateIds.has(s.id)) b.id = s.id;
     }
     if (!b) { report.skipped.push(s.t); continue; }
+    usedIds.add(b.id);
 
     // Raid damage is never persistent (returnToBuilder resets every building), so a city
     // saved mid-raid must not come back half-destroyed.
@@ -264,13 +279,19 @@ export function restoreCity(bm, blob, now = Date.now()) {
 }
 
 /**
- * The building a saved job belongs to. A job that records an index is matched by it alone,
- * and serializeCity always writes the type beside it, so both must agree (a job with no type
- * used to 'upgrade' whatever sat at that index - a Main Gate included). Saves from before the
- * index only have the tile, so match the job's type if known and never pick a gate, a building
- * that already has a job, or decoration over a real building.
+ * The building a saved job belongs to. A job that names its building's id is matched by that
+ * first (ids are what remote edits keep stable, so an index can be stale after one). Otherwise a
+ * job that records an index is matched by it alone, and serializeCity always writes the type
+ * beside it, so both must agree (a job with no type used to 'upgrade' whatever sat at that
+ * index - a Main Gate included). Saves from before the index only have the tile, so match the
+ * job's type if known and never pick a gate, a building that already has a job, or decoration
+ * over a real building.
  */
 function taskBuilding(t, restored, bm) {
+  if (typeof t.id === 'string') {
+    const b = restored.find(r => r && r.id === t.id);
+    if (b) return !b.isMainGate && (typeof t.t !== 'string' || b.type === t.t) ? b : null;
+  }
   if (t.i !== undefined && t.i !== null) {
     const i = Number(t.i);
     const b = Number.isInteger(i) && i >= 0 && i < restored.length ? restored[i] : null;

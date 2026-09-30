@@ -1,0 +1,651 @@
+{
+ "townHall": 5,
+ "layout": {
+  "v": 1,
+  "savedAt": 1790690169025,
+  "buildings": [
+   {
+    "id": "bmumqowj6gngaw258",
+    "t": "town_hall",
+    "gx": 3,
+    "gz": 3,
+    "l": 5,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "gate_north_gate",
+    "t": "main_gate",
+    "gx": 0,
+    "gz": -15,
+    "l": 1,
+    "st": 0,
+    "rot": 0,
+    "gate": "North Gate"
+   },
+   {
+    "id": "gate_east_gate",
+    "t": "main_gate",
+    "gx": 15,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 1.5707963267948966,
+    "gate": "East Gate"
+   },
+   {
+    "id": "gate_south_gate",
+    "t": "main_gate",
+    "gx": 0,
+    "gz": 15,
+    "l": 1,
+    "st": 0,
+    "rot": 3.141592653589793,
+    "gate": "South Gate"
+   },
+   {
+    "id": "bmumqowj74is3id5f",
+    "t": "police_station",
+    "gx": -4,
+    "gz": -3,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj71jyxor8n",
+    "t": "petrol_pump",
+    "gx": -3,
+    "gz": 3,
+    "l": 1,
+    "st": 28839,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj7x9xsed83",
+    "t": "petrol_pump",
+    "gx": 8,
+    "gz": -3,
+    "l": 1,
+    "st": 28839,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj72zx2aesf",
+    "t": "lumber_mill",
+    "gx": -8,
+    "gz": -8,
+    "l": 3,
+    "st": 42859,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj70ejleh21",
+    "t": "iron_foundry",
+    "gx": 8,
+    "gz": 4,
+    "l": 1,
+    "st": 18000,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj7ho3unprg",
+    "t": "builder_hut",
+    "gx": 4,
+    "gz": -4,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8yrx8h8mb",
+    "t": "builder_hut",
+    "gx": -4,
+    "gz": 8,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8wpduegld",
+    "t": "spike_trap",
+    "gx": 0,
+    "gz": -11,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8u1w1nm4e",
+    "t": "roadblock",
+    "gx": 0,
+    "gz": 11,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj83z8k02rr",
+    "t": "roadblock",
+    "gx": 11,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8ivs0xchr",
+    "t": "tree",
+    "gx": -10,
+    "gz": -3,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8mnlbzk23",
+    "t": "tree",
+    "gx": -11,
+    "gz": -5,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8cc3qkm7a",
+    "t": "tree",
+    "gx": -12,
+    "gz": -7,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8oz8ifqso",
+    "t": "tree",
+    "gx": -10,
+    "gz": 3,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8tdi4ju86",
+    "t": "tree",
+    "gx": -12,
+    "gz": 5,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8arupmojm",
+    "t": "tree",
+    "gx": 10,
+    "gz": -8,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8vohynfxa",
+    "t": "tree",
+    "gx": 11,
+    "gz": -10,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8ulzaog22",
+    "t": "tree",
+    "gx": 9,
+    "gz": 9,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8ebpvwck2",
+    "t": "tree",
+    "gx": 12,
+    "gz": 11,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqowj8fgoqcxkt",
+    "t": "tree",
+    "gx": -3,
+    "gz": 11,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbibxmz1whk",
+    "t": "builder_hut",
+    "gx": 9,
+    "gz": -6,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbi1nfdql6m",
+    "t": "builder_hut",
+    "gx": -9,
+    "gz": 6,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbibmk0ukzy",
+    "t": "big_storage",
+    "gx": -3,
+    "gz": -9,
+    "l": 2,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbj6al20q5k",
+    "t": "vehicle_lab",
+    "gx": 9,
+    "gz": 8,
+    "l": 3,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbk9dtxnb5j",
+    "t": "weapons_lab",
+    "gx": -7,
+    "gz": 10,
+    "l": 2,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbmx447b19b",
+    "t": "tech_lab",
+    "gx": 3,
+    "gz": 9,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbmookjzgrj",
+    "t": "sniper_tower",
+    "gx": 3,
+    "gz": -8,
+    "l": 4,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbmm2q34z99",
+    "t": "sniper_tower",
+    "gx": -8,
+    "gz": -2,
+    "l": 3,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbnj2p4suve",
+    "t": "sniper_tower",
+    "gx": 9,
+    "gz": 2,
+    "l": 2,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbpr9y8kzmg",
+    "t": "tesla_coil",
+    "gx": -2,
+    "gz": 8,
+    "l": 3,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbq7a9cctdx",
+    "t": "tesla_coil",
+    "gx": 2,
+    "gz": -4,
+    "l": 2,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbrukmmifmu",
+    "t": "missile_silo",
+    "gx": -2,
+    "gz": -4,
+    "l": 4,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbtx39nrnl8",
+    "t": "police_station",
+    "gx": 5,
+    "gz": 8,
+    "l": 2,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbus65254jo",
+    "t": "swat_armory",
+    "gx": 10,
+    "gz": -2,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbvi4nmg802",
+    "t": "cash_mint",
+    "gx": 11,
+    "gz": -4,
+    "l": 1,
+    "st": 14425,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbvhbz0qwgl",
+    "t": "oil_refinery",
+    "gx": -12,
+    "gz": 2,
+    "l": 2,
+    "st": 58370,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbw4j25z2qj",
+    "t": "solar_array",
+    "gx": -2,
+    "gz": -12,
+    "l": 1,
+    "st": 8652,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbxiekjscmz",
+    "t": "lumber_mill",
+    "gx": -10,
+    "gz": -6,
+    "l": 1,
+    "st": 25200,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbxvkgtdp75",
+    "t": "spring_trap",
+    "gx": 0,
+    "gz": -8,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbxyw42oz4a",
+    "t": "spring_trap",
+    "gx": 8,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxby7psx7wyi",
+    "t": "landmine",
+    "gx": 0,
+    "gz": 8,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbyeftvg860",
+    "t": "landmine",
+    "gx": -8,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbyl87zti0w",
+    "t": "landmine",
+    "gx": 6,
+    "gz": 3,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbzzy7lgh4y",
+    "t": "freeze_trap",
+    "gx": 0,
+    "gz": -4,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbzk873hhsv",
+    "t": "roadblock",
+    "gx": -9,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbz7mxwjwvu",
+    "t": "roadblock",
+    "gx": -10,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxbz7sx1b4j7",
+    "t": "roadblock",
+    "gx": -11,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   },
+   {
+    "id": "bmumqoxc019zg8t6a",
+    "t": "roadblock",
+    "gx": -7,
+    "gz": 0,
+    "l": 1,
+    "st": 0,
+    "rot": 0
+   }
+  ],
+  "tasks": [
+   {
+    "i": 33,
+    "id": "bmumqoxbpr9y8kzmg",
+    "t": "tesla_coil",
+    "gx": -2,
+    "gz": 8,
+    "to": 4,
+    "endsAt": 1790690369025,
+    "total": 200
+   }
+  ],
+  "roads": [
+   "0,0",
+   "0,1",
+   "0,2",
+   "0,3",
+   "0,4",
+   "0,5",
+   "0,6",
+   "0,7",
+   "0,8",
+   "0,9",
+   "0,10",
+   "0,11",
+   "0,12",
+   "0,13",
+   "0,14",
+   "0,15",
+   "0,-1",
+   "0,-2",
+   "0,-3",
+   "0,-4",
+   "0,-5",
+   "0,-6",
+   "0,-7",
+   "0,-8",
+   "0,-9",
+   "0,-10",
+   "0,-11",
+   "0,-12",
+   "0,-13",
+   "0,-14",
+   "0,-15",
+   "1,0",
+   "2,0",
+   "3,0",
+   "4,0",
+   "5,0",
+   "6,0",
+   "7,0",
+   "8,0",
+   "9,0",
+   "10,0",
+   "11,0",
+   "12,0",
+   "13,0",
+   "14,0",
+   "15,0",
+   "-1,0",
+   "-2,0",
+   "-3,0",
+   "-4,0",
+   "-5,0",
+   "-6,0",
+   "-7,0",
+   "-8,0",
+   "-9,0",
+   "-10,0",
+   "-11,0",
+   "-12,0",
+   "-13,0",
+   "-14,0",
+   "-15,0",
+   "6,1",
+   "6,2",
+   "6,3",
+   "6,4",
+   "6,5",
+   "6,6",
+   "1,6",
+   "2,6",
+   "3,6",
+   "4,6",
+   "5,6",
+   "-6,1",
+   "-6,2",
+   "-6,3",
+   "-6,4",
+   "-6,5",
+   "-6,6",
+   "-1,6",
+   "-2,6",
+   "-3,6",
+   "-4,6",
+   "-5,6",
+   "6,-1",
+   "6,-2",
+   "6,-3",
+   "6,-4",
+   "6,-5",
+   "6,-6",
+   "1,-6",
+   "2,-6",
+   "3,-6",
+   "4,-6",
+   "5,-6",
+   "-6,-1",
+   "-6,-2",
+   "-6,-3",
+   "-6,-4",
+   "-6,-5",
+   "-6,-6",
+   "-1,-6",
+   "-2,-6",
+   "-3,-6",
+   "-4,-6",
+   "-5,-6",
+   "1,-10",
+   "2,-10",
+   "3,-10",
+   "4,-10",
+   "5,-10",
+   "6,-10",
+   "7,-10",
+   "7,-9",
+   "7,-8",
+   "7,-7",
+   "7,-6"
+  ]
+ },
+ "holdings": {
+  "inventory": {
+   "road": 34,
+   "lumber_mill": 0,
+   "spike_trap": 1,
+   "roadblock": 0,
+   "tree": 5,
+   "builder_hut": 0,
+   "big_storage": 0,
+   "vehicle_lab": 0,
+   "weapons_lab": 0,
+   "tech_lab": 0,
+   "sniper_tower": 0,
+   "tesla_coil": 0,
+   "missile_silo": 0,
+   "police_station": 0,
+   "swat_armory": 0,
+   "cash_mint": 1,
+   "oil_refinery": 0,
+   "solar_array": 0,
+   "spring_trap": 0,
+   "landmine": 2,
+   "freeze_trap": 0,
+   "iron_foundry": 1
+  },
+  "stowedCounts": {
+   "cash_mint": 1,
+   "iron_foundry": 1,
+   "spike_trap": 1
+  },
+  "stowedLevels": {
+   "cash_mint": [
+    3
+   ],
+   "iron_foundry": [
+    2
+   ]
+  },
+  "stowedSealed": {},
+  "bankCredits": {}
+ }
+}

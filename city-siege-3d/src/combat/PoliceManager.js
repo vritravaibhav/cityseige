@@ -533,6 +533,10 @@ export class PoliceManager {
     });
     this.roadblocks = [];
     this.respawnQueue = [];
+    // The spawners belong to the city just raided - after a battle raid, the arena's buildings.
+    // Kept, they held the torn-down arena alive until the next raid re-assigned the list.
+    // (Every raid start and respawn calls spawnFromStations right after clear().)
+    this.stations = [];
     this.totalWrecked = 0;
     this.sound.setSirenActive(false);
   }

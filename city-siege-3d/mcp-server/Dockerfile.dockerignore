@@ -1,0 +1,15 @@
+# Used by BuildKit for `docker build -f mcp-server/Dockerfile .` (context = city-siege-3d/).
+# Keep the context to what the image copies; never send keys or local env files.
+**/node_modules
+dist
+tools
+docs
+public
+index.html
+.env*
+**/*.json.key
+**/*service-account*.json
+**/*firebase-adminsdk*.json
+**/*-sa-key*.json
+**/.DS_Store
+mcp-server/test

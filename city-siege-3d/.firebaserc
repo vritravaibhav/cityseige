@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "demo-city-siege",
+    "prod": "shadow-duel-dark-2026"
+  }
+}

@@ -182,6 +182,32 @@ export class VehicleController {
   }
 
   /**
+   * Night battle raids (SceneManager raid theme 'night') light the road ahead with a headlight
+   * that rides on the buggy. Built once, on the first night raid, and only toggled after that:
+   * adding or removing a light changes the light count every lit material's shader is compiled
+   * for, so it is never churned per raid. An invisible light is left out of the render (and so
+   * is every light on the hidden buggy between raids), so day raids render exactly as before.
+   */
+  setHeadlight(on) {
+    if (!on && !this.headlight) return;
+    if (!this.headlight) {
+      // Warm white cone, 70m reach. The buggy's local +Z is forward (mesh.rotation.y = heading).
+      // It hangs a little above and behind the bonnet rather than in the grille, so the cone also
+      // catches the buggy's own roof and bonnet - from the chase camera a buggy lit only in front
+      // of itself was a black shape on a black road.
+      const spot = new THREE.SpotLight(0xfff0d8, 70, 70, Math.PI / 4.6, 0.55, 1.1);
+      spot.name = 'buggy_headlight';
+      spot.position.set(0, 3.0, -0.8);
+      spot.target.position.set(0, 0, 16);
+      spot.castShadow = false;   // a second shadow map every frame is not worth it
+      this.mesh.add(spot);
+      this.mesh.add(spot.target);
+      this.headlight = spot;
+    }
+    this.headlight.visible = !!on;
+  }
+
+  /**
    * Apply Vehicle Garage tuning as ABSOLUTE values (see GarageManager.computeVehicleStats).
    * Called immediately before spawnAt() at breach, because spawnAt copies maxHp into hp.
    */

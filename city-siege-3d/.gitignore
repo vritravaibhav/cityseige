@@ -1,0 +1,4 @@
+# Firebase Admin keys (they bypass firestore.rules for every player). The console downloads them as
+# <project>-firebase-adminsdk-<id>-<hash>.json, which the repo root's `*service-account*.json` misses.
+*firebase-adminsdk*.json
+*-sa-key*.json

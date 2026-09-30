@@ -6,12 +6,13 @@ Welcome to **City Siege 3D**, an action-strategy hybrid combining city-building 
 
 ## 📑 Table of Contents
 1. [Research Labs: Vehicle Tuning & Explosive Munitions](#1-research-labs-vehicle-tuning--explosive-munitions)
-2. [Builder System: Concurrency, Timers & Town Hall Unlocks](#2-builder-system-concurrency-timers--town-hall-unlocks)
+2. ["Hire a Labour" System: Concurrency, Timers & Town Hall Unlocks](#2-hire-a-labour-system-concurrency-timers--town-hall-unlocks)
 3. [Master Town Hall Progression Matrix (TH 1 to TH 12)](#3-master-town-hall-progression-matrix-th-1-to-th-12)
 4. [Building Capacities & Unlocks per Town Hall Level](#4-building-capacities--unlocks-per-town-hall-level)
 5. [Maximum Building Upgrade Level Caps](#5-maximum-building-upgrade-level-caps)
 6. [Visual Evolution Across Architectural Tiers](#6-visual-evolution-across-architectural-tiers)
 7. [Persistent Data Files & References](#7-persistent-data-files--references)
+8. [Online Play: Accounts, Battles & the AI Designer](#8-online-play-accounts-battles--the-ai-designer)
 
 ---
 
@@ -230,3 +231,34 @@ The **"Hire a Labour"** system governs all construction and structural upgrades 
 * **Master Progression & Builder JSON**: [`src/data/town_hall_progression.json`](./src/data/town_hall_progression.json) (and root `./town_hall_progression.json`)
 * **Brain Artifact Progression Guide**: `C:\Users\divai\.gemini\antigravity\brain\f3a9c818-8af7-4a28-a847-6e558dcd5d68\town_hall_progression_guide.md`
 * **Game Entrypoint**: [`index.html`](./index.html) & [`src/main.js`](./src/main.js)
+
+---
+
+## 8. Online Play: Accounts, Battles & the AI Designer
+
+Online play is an optional layer on top of the offline game: **accounts** (Firebase Authentication, email + password or Google), a **cloud save** of each player's city, bank and garage (Cloud Firestore), **PvP battles** between two players, and an **AI designer** that edits your city through an MCP server. A build without Firebase settings plays fully offline, exactly as before, and never loads the Firebase SDK. The full guides live in `city-siege-3d/docs/`.
+
+### How to run it
+
+| You want | Do this (from `city-siege-3d/`) |
+| :--- | :--- |
+| Offline play, as always | `npm install && npm run dev` (no `.env.local`) |
+| Online play locally, no real project | `npm run emulators` in one terminal (needs the Firebase CLI and Java), `npm run dev:emu` in another, open `http://localhost:3101` |
+| Online play for real | Create a Firebase project, deploy `firestore.rules` + indexes, put the web config in `.env.local`: step by step in [`docs/ONLINE.md`](docs/ONLINE.md#setup-from-zero-a-real-firebase-project) |
+| The AI designer | Generate a token in the game (ACCOUNT → AI Designer (MCP)) and connect Claude: [`docs/MCP.md`](docs/MCP.md) |
+
+### Battles in one paragraph
+
+Challenge a rival from **🏆 BATTLES**, either **Instant** (after a 0/2/5/10-minute design window; both pressing READY starts it early) or **Scheduled** (a time 10 minutes to 7 days ahead, e.g. tonight 21:00, optionally with the night theme). Until the start time both players design their cities, by hand or with the AI. At the start both cities **lock**, and each player gets **one raid** (10-minute clock) on the other's locked copy, played in a separate arena so your own city is never touched. More stars wins, then higher destruction %, then the faster raid. Winner +30 trophies, loser −20 (floored at 0), draw +5 each; a battle nobody raided is void (no trophies, no record change). The raid pays the usual minted loot and gems; nobody's bank is debited. Full rules: [`docs/BATTLES.md`](docs/BATTLES.md).
+
+### The AI designer (MCP)
+
+A personal, revocable token lets Claude Code, Claude Desktop or any MCP client **design** your city: place buildings from your inventory, move or stow them, clear trees, draw and erase roads. It cannot attack, buy, upgrade, collect or touch the bank. Every edit is validated by the same rules as the game's Design screen, saved as one Firestore transaction, shown live in your open game, and can be undone until the game saves a change of its own. The server lives in `mcp-server/` (stdio for local use, Streamable HTTP for hosting; Dockerfile included).
+
+### Online docs & tests
+
+* **Setup, architecture, data model, sync, security**: [`docs/ONLINE.md`](docs/ONLINE.md)
+* **Battle rules for players**: [`docs/BATTLES.md`](docs/BATTLES.md)
+* **AI designer, tools reference, hosting**: [`docs/MCP.md`](docs/MCP.md) and [`mcp-server/README.md`](mcp-server/README.md)
+* **Engineering contract and deviations log**: [`docs/ONLINE_SPEC.md`](docs/ONLINE_SPEC.md)
+* **Tests**: `npm run test:shared` and `npm run test:sync` (no emulator), `npm run test:rules` and `npm run test:mcp` (Firestore emulator running), or `npm run test:online` (starts its own emulators). In Chrome (`PW_CORE` = a playwright-core install, `GAME_URL` = the game): `npm run test:parity` (offline build), `npm run test:e2e` (emulators + an emulator-mode build, `FIREBASE_PROJECT_ID` = its project); `npm run fixtures` regenerates the test cities. The table with every command is in [`docs/ONLINE.md`](docs/ONLINE.md#testing). The existing `node tools/verify-progression.mjs`, `node tools/verify-meshes.mjs` and `tools/e2e/smoke.mjs` (offline build) still apply.
