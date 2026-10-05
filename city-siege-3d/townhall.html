@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Town Hall Preview - City Siege 3D</title>
+  <!-- Developer test page: served by `vite` (dev) only. `vite build` builds index.html alone, so
+       none of this ships. It reads the game's code and writes nothing: see tools/preview/. -->
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/src/styles.css">
+  <link rel="stylesheet" href="/tools/preview/townhall-preview.css">
+</head>
+<body class="thp">
+  <!-- The game's own renderer draws here (SceneManager appends its canvas). -->
+  <div id="canvas-container"></div>
+
+  <div id="thp-ui" class="thp-ui" data-tab="info">
+    <aside class="thp-left">
+      <div class="thp-head thp-glass">
+        <div class="thp-brand">
+          <div class="thp-brand-icon">🏛️</div>
+          <div class="thp-brand-text">
+            <div class="thp-brand-title">TOWN HALL PREVIEW</div>
+            <div class="thp-brand-sub">Dev test page · your saved city is never touched</div>
+          </div>
+        </div>
+        <div class="thp-th-grid" id="thp-th-grid" role="radiogroup" aria-label="Town Hall level"></div>
+      </div>
+
+      <div class="thp-body thp-glass">
+        <nav class="thp-tabs" role="tablist">
+          <button type="button" data-tab="info" role="tab">Town Hall</button>
+          <button type="button" data-tab="opts" role="tab">Options</button>
+          <button type="button" data-tab="list" role="tab">Contents</button>
+        </nav>
+
+        <section class="thp-sec" data-sec="info">
+          <div class="thp-th-card">
+            <div class="thp-th-badge" id="thp-th-badge">1</div>
+            <div class="thp-th-names">
+              <div class="thp-th-name" id="thp-th-name"></div>
+              <div class="thp-th-theme" id="thp-th-theme"></div>
+            </div>
+          </div>
+          <div class="thp-stats" id="thp-stats"></div>
+          <div class="thp-label">New at this Town Hall</div>
+          <div class="thp-new" id="thp-new"></div>
+          <div class="thp-raised" id="thp-raised"></div>
+        </section>
+
+        <section class="thp-sec" data-sec="opts">
+          <div class="thp-opt">
+            <div class="thp-opt-k">Fill</div>
+            <div class="thp-seg" data-opt="fill">
+              <button type="button" data-val="full" title="Every building type up to its build limit">Full</button>
+              <button type="button" data-val="typical" title="About 60% of each build limit">Typical ~60%</button>
+            </div>
+          </div>
+          <div class="thp-opt">
+            <div class="thp-opt-k">Levels</div>
+            <div class="thp-seg" data-opt="levels">
+              <button type="button" data-val="max" title="Every upgradeable building at the Town Hall's level">Max = TH</button>
+              <button type="button" data-val="one" title="Every building at level 1 (the Town Hall keeps its level)">Level 1</button>
+            </div>
+          </div>
+          <div class="thp-opt">
+            <div class="thp-opt-k">View</div>
+            <div class="thp-seg thp-seg-3" data-opt="view">
+              <button type="button" data-val="city" title="The isometric builder camera, as on the home screen">City</button>
+              <button type="button" data-val="satellite" title="The recon (satellite) camera a raid opens on">Satellite</button>
+              <button type="button" data-val="night" title="The recon camera with the night battle theme">Night</button>
+            </div>
+          </div>
+          <div class="thp-actions">
+            <button type="button" class="thp-btn" id="thp-reset" title="Frame the whole city">⟲ Reset camera</button>
+            <button type="button" class="thp-btn thp-btn-gold" id="thp-all" title="Render every Town Hall side by side">▦ All 12</button>
+          </div>
+          <div class="thp-hint">Drag to pan · wheel or pinch to zoom · ← → change Town Hall</div>
+        </section>
+
+        <section class="thp-sec" data-sec="list" id="thp-list-mobile"></section>
+      </div>
+    </aside>
+
+    <aside class="thp-right thp-glass" id="thp-right">
+      <button type="button" class="thp-collapse" id="thp-collapse" title="Hide the list" aria-label="Hide the list">›</button>
+      <div class="thp-list-host" id="thp-list-desktop"></div>
+    </aside>
+    <button type="button" class="thp-reopen thp-glass" id="thp-reopen" title="Show what is in the city">☰ Contents</button>
+
+    <div class="thp-toast" id="thp-toast" aria-live="polite"></div>
+  </div>
+
+  <div class="thp-overlay hidden" id="thp-overlay" role="dialog" aria-modal="true" aria-labelledby="thp-overlay-title">
+    <div class="thp-overlay-top">
+      <div>
+        <div class="thp-overlay-title" id="thp-overlay-title">ALL 12 TOWN HALLS</div>
+        <div class="thp-overlay-sub" id="thp-overlay-sub"></div>
+      </div>
+      <button type="button" class="thp-btn" id="thp-overlay-close">✕ Close</button>
+    </div>
+    <div class="thp-progress" id="thp-progress"><div class="thp-progress-fill" id="thp-progress-fill"></div></div>
+    <div class="thp-grid" id="thp-grid"></div>
+  </div>
+
+  <script type="module" src="/tools/preview/townhall-preview.js"></script>
+</body>
+</html>

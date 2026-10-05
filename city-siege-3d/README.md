@@ -226,6 +226,8 @@ The **"Hire a Labour"** system governs all construction and structural upgrades 
 
 ---
 
+**See it live:** run `npm run dev` and open **`/townhall.html`** (for example `http://localhost:3000/townhall.html`). This dev-only page builds a full city for any Town Hall 1-12 with the game's own renderer and placement rules. Options: Full or ~60% fill, max or level-1 buildings, and city / satellite / night views. It also has an **All 12** side-by-side grid, and links like `townhall.html?th=7&view=night` open a level directly. It never touches your save and is not part of `npm run build` (code in `tools/preview/`).
+
 ## 7. Persistent Data Files & References
 
 * **Master Progression & Builder JSON**: [`src/data/town_hall_progression.json`](./src/data/town_hall_progression.json) (and root `./town_hall_progression.json`)
